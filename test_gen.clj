@@ -16,6 +16,6 @@
 (def reg (scripts/reg-script! :test-payload-gen
                               {:name "test-payload-generator"
                                :version "0.0.1"
-                               :min-burp-clj-version "0.1.1"
+                               :min-burp-clj-version "0.2.0"
                                :intruder-payload-generator {:test-payload (make-payload)}
                                }))
