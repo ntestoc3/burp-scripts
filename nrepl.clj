@@ -72,9 +72,6 @@
                                        wrap-refactor
                                        wrap-classloader))]
         (swap! state/state assoc :nrepl-server nrepl-server)
-        (extender/register-extension-state-listener!
-         :nrepl-server
-         (make-unload-callback stop-nrepl))
         (log/info "nrepl started.")))))
 
 ;;;;; gui
