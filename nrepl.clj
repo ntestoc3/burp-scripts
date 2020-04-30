@@ -156,7 +156,7 @@
                                :version "0.0.1"
                                :min-burp-clj-version "0.1.1"
                                :enable-callback (fn [_] (start-nrepl))
-                               :disable-callback (fn [_] stop-nrepl)
+                               :disable-callback (fn [_] (stop-nrepl))
                                :tab {:nrepl-main {:captain "nREPL"
                                                   :view (make-nrepl-view)}}
                                }))
