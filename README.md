@@ -8,3 +8,7 @@
 ## shiro-check 
 
 检测是否使用了shiro框架
+
+## nrepl
+
+开启clojure nrepl server, 方便调试script代码
