@@ -7,4 +7,4 @@
 
 ## shiro-check 
 
-检测使用使用了shiro框架
+检测是否使用了shiro框架
