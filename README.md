@@ -12,3 +12,7 @@
 ## nrepl
 
 开启clojure nrepl server, 方便调试script代码
+
+## ip-loc 
+
+添加ip地址显示
