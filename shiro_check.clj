@@ -16,14 +16,15 @@
                (helper/add-parameter req)
                (.setRequest req-resp)))
         (let [resp (-> (.getResponse req-resp)
-                       helper/analyze-response)]
+                       helper/analyze-response)
+              org-comment (.getComment req-resp)]
           (when (->> (:cookies resp)
                      (take-while #(and (= (:name %) "rememberMe")
                                        (= (:value %) "deleteMe")))
                      seq)
             (doto req-resp
               (.setHighlight "orange")
-              (.setComment "maybe Shiro!"))))))))
+              (.setComment (str "maybe Shiro! " org-comment)))))))))
 
 (defn shiro-check-proxy []
   (proxy/make-proxy-proc shiro-check))

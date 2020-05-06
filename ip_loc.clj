@@ -15,7 +15,7 @@
           ip (-> (.getHttpService req-resp)
                  (.getHost))
           ip-geo (qqwry/get-location ip)
-          ip-loc-str (str (:county ip-geo) " -- " (:area ip-geo))]
+          ip-loc-str (str (:county ip-geo) " -- " (:area ip-geo) " " (.getComment req-resp))]
       (.setComment req-resp ip-loc-str))))
 
 (defn ip-loc-proxy []
