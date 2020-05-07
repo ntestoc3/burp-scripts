@@ -1,6 +1,8 @@
 (ns ip-loc
   (:require [clojure.string :as str]
             [taoensso.timbre :as log]
+            [burp-clj.utils :as utils]
+            [burp-clj.scripts :as scripts]
             [burp-clj.proxy :as proxy]))
 
 
