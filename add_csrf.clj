@@ -9,11 +9,25 @@
   (:import [burp ISessionHandlingAction]
            ))
 
+(utils/add-dep '[[clj-http "3.10.1"]])
+(require '[clj-http.client :as http])
+
 (defn extract-csrf-token
   [body]
   (some->> body
            (re-find #"name=\"csrf-token\"\scontent=\"(.*)\"")
            second))
+
+(defn send-request
+  "`use-proxy` 是否使用burp proxy代理,方便调试"
+  ([req use-proxy]
+   (send-request (if use-proxy
+                   (merge req {:insecure? true
+                               :proxy-host "127.0.0.1"
+                               :proxy-port 8080 })
+                   req)))
+  ([req]
+   (http/request req)))
 
 (defn set-csrf-token
   "设置`curr-req` csrf token"
@@ -21,21 +35,19 @@
      :or {follow-redirect true}}]
    (when-let [resp-info (-> (.getResponse last-req)
                             (utils/parse-response))]
-     (let [req-info (-> (.getRequest curr-req)
-                        (utils/parse-request))
+     (let [service (-> (.getHttpService curr-req)
+                       (helper/parse-http-service))
+           req-info (-> (.getRequest curr-req)
+                        (utils/parse-request (= "https" (:protocol service))))
            resp (if (and follow-redirect
                          (#{301 302} (:status resp-info)))
-                  ;; 构造重定向请求
-                  ;; 注意！如果在重定向后，如果这个重定向location在session handling rule里面
-                  ;; 则会重复调用规则,需要exclude重定向后的地址，或者Tools Scope里面去掉Extender
-                  (let [location (get-in resp-info [:headers :location])
-                        req (utils/build-request {:url location
-                                                  :headers (:headers req-info)})]
+                  ;; 重定向引发循环调用session action的问题，不容易解决，
+                  ;; 自己实现发送请求,绕过burp
+                  (let [location (get-in resp-info [:headers :location])]
                     (log/info :get-csrf-token "redirect to:" location)
-                    (-> (extender/make-http-req (.getHttpService curr-req)
-                                                (.getBytes req))
-                        (.getResponse)
-                        utils/parse-response))
+                    (send-request (assoc req-info
+                                         :url location
+                                         :throw-exceptions false)))
                   resp-info)]
        (when-let [csrf-token (extract-csrf-token (:body resp))]
          (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
@@ -57,7 +69,7 @@
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
                                :version "0.0.1"
-                               :min-burp-clj-version "0.1.0"
+                               :min-burp-clj-version "0.3.1"
                                :session-handling-action {:add-csrf/action
                                                          (make-action)}
                                }))
