@@ -15,10 +15,11 @@
           (->> (helper/build-parameter "rememberMe" "test" :cookie)
                (helper/add-parameter req)
                (.setRequest req-resp)))
-        (let [resp (-> (.getResponse req-resp)
-                       helper/analyze-response)
+        (let [resp-cookies (-> (.getResponse req-resp)
+                               helper/analyze-response
+                               .getCookies)
               org-comment (.getComment req-resp)]
-          (when (->> (:cookies resp)
+          (when (->> resp-cookies
                      (take-while #(and (= (:name %) "rememberMe")
                                        (= (:value %) "deleteMe")))
                      seq)
