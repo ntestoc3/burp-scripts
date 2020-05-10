@@ -13,16 +13,6 @@
             [seesaw.mig :refer [mig-panel]]
             [taoensso.timbre :as log]))
 
-(defmacro dyn-call
-  [ns-sym]
-  (let [ns (-> (namespace ns-sym)
-               symbol)
-        sym (-> (name ns-sym)
-                symbol)]
-    `(do
-       (require '~ns)
-       (ns-resolve '~ns '~sym))))
-
 (extender/defsetting :nrepl-server/port 2233 validate/valid-port?)
 (extender/defsetting :nrepl/nrepl-version "0.7.0")
 (extender/defsetting :nrepl/refactor-version "2.5.0")
@@ -42,7 +32,7 @@
 (defn stop-nrepl
   []
   (when-let [server (:nrepl-server @state/state)]
-   ((dyn-call nrepl.server/stop-server) server)
+   ((utils/dyn-call nrepl.server/stop-server) server)
     (swap! state/state dissoc :nrepl-server)
     (log/info "nrepl stopped!")))
 
@@ -59,12 +49,12 @@
       nil
       (load-deps)
       ;; (log/info :start-nrepl :refactor-nrepl-version
-      ;;           ((dyn-call refactor-nrepl.core/version)))
+      ;;           ((utils/dyn-call refactor-nrepl.core/version)))
       (let [port (get-port)
             _ (log/info "nrepl starting at:" port )
-            cider-nrepl-handler (dyn-call cider.nrepl/cider-nrepl-handler)
-            wrap-refactor (dyn-call refactor-nrepl.middleware/wrap-refactor)
-            start-server (dyn-call nrepl.server/start-server)
+            cider-nrepl-handler (utils/dyn-call cider.nrepl/cider-nrepl-handler)
+            wrap-refactor (utils/dyn-call refactor-nrepl.middleware/wrap-refactor)
+            start-server (utils/dyn-call nrepl.server/start-server)
             nrepl-server (start-server
                           :bind "0.0.0.0"
                           :port port
