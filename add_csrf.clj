@@ -27,7 +27,9 @@
                                :proxy-port 8080 })
                    req)))
   ([req]
-   (http/request req)))
+   (let [r (http/request req)]
+     (log/info :send-request "return:" (:status r))
+     r)))
 
 (defn set-csrf-token
   "设置`curr-req` csrf token"
@@ -49,12 +51,13 @@
                                          :url location
                                          :throw-exceptions false)))
                   resp-info)]
-       (when-let [csrf-token (extract-csrf-token (:body resp))]
-         (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
-         (->> (assoc-in req-info [:headers :x-csrf-token] csrf-token)
-              (utils/build-request)
-              (.getBytes)
-              (.setRequest curr-req)))))))
+       (if-let [csrf-token (extract-csrf-token (:body resp))]
+         (do (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
+             (->> (assoc-in req-info [:headers :x-csrf-token] csrf-token)
+                  (utils/build-request)
+                  (.getBytes)
+                  (.setRequest curr-req)))
+         (do (log/warn :set-csrf-token "not found csrf token, response:" resp)))))))
 
 (defn make-action
   []
