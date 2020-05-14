@@ -1,16 +1,257 @@
 (ns add-csrf
   (:require [clojure.string :as str]
             [taoensso.timbre :as log]
+            [seesaw.swingx :as guix]
+            [seesaw.rsyntax :as rsyntax]
+            [seesaw.table :as table]
+            [seesaw.bind :as bind]
+            [seesaw.mig :refer [mig-panel]]
+            [seesaw.keymap :as keymap]
+            [seesaw.border :as border]
             [burp-clj.utils :as utils]
             [burp-clj.helper :as helper]
+            [burp-clj.syntax-editor :as syntax-editor]
             [burp-clj.extender :as extender]
             [burp-clj.scripts :as scripts]
-            [burp-clj.proxy :as proxy])
+            [burp-clj.proxy :as proxy]
+            [seesaw.core :as gui])
   (:import [burp ISessionHandlingAction]
+           javax.swing.ComboBoxEditor
+           java.awt.event.KeyEvent
+           java.awt.Color
            ))
 
 (utils/add-dep '[[clj-http "3.10.1"]])
 (require '[clj-http.client :as http])
+
+(def http-message-cols-info [{:key :index :text "#" :class java.lang.Long}
+                             {:key :host :text "Host" :class java.lang.String}
+                             {:key :request/url :text "URL" :class java.lang.String}
+                             {:key :response/status :text "Resp.Status" :class java.lang.Long}
+                             {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
+                             {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
+                             {:key :port :text "PORT" :class java.lang.Long}
+                             {:key :comment :text "Comment" :class java.lang.String}])
+
+
+
+(defn get-filter-pred
+  "如果是错误的过滤表达式则抛出异常,否则返回过滤表达式函数"
+  [filter-exp]
+  (utils/add-dep []) ;; 必须加载依赖,否则在awt线程中会执行失败！
+  (let [exp (-> (format "(fn [msg] %s)" filter-exp)
+                (load-string))]
+    (exp {})
+    exp))
+
+(defn make-http-message-model
+  [filter-pred datas]
+  (table/table-model :columns http-message-cols-info
+                     :rows (try
+                             (-> (try (get-filter-pred filter-pred)
+                                      (catch Exception e
+                                        (constantly false)))
+                                 (filter datas)
+                                 doall)
+                             (catch Exception e
+                               (log/error :make-http-message-model e)))))
+
+(defn make-ac-combox
+  [{:keys [setting-key auto-completion item-validation]
+    :or {item-validation identity}}]
+  (let [datas (extender/get-setting setting-key)
+        cb (gui/combobox :model datas
+                         :editable? true)
+        model (.getModel cb)
+        editor (-> (.getEditor cb)
+                   (.getEditorComponent))]
+    (->> (.getSize model)
+         (.insertElementAt model "clear all"))
+    (when auto-completion
+      (-> (syntax-editor/make-completion auto-completion)
+          (.install editor)))
+    (keymap/map-key editor
+                    "ENTER" (fn [e]
+                              (let [txt (gui/text e)]
+                                (cond
+                                  (empty? txt)
+                                  (->> (border/line-border :color Color/RED)
+                                       (.setBorder editor))
+
+                                  (= (.getElementAt model 0) txt)
+                                  (->> (border/empty-border)
+                                       (.setBorder editor))
+
+                                  (item-validation txt)
+                                  (do
+                                    (->> (border/line-border :color Color/GREEN)
+                                         (.setBorder editor))
+                                    (extender/update-setting! setting-key #(cons txt %1) )
+                                    (.insertElementAt model txt 0)
+                                    (.setSelectedItem model txt))
+
+                                  :else
+                                  (->> (border/line-border :color Color/RED)
+                                       (.setBorder editor))
+                                  )))
+                    :scope :self)
+    (gui/listen cb :selection
+                (fn [e]
+                  (let [exp (gui/selection cb)]
+                    (log/info "cb selection:" exp)
+                    (when (and (= exp "clear all")
+                               (> (.getSize model) 1))
+                      (log/info "clear all filter info:" setting-key)
+                      (.removeAllElements model)
+                      (extender/set-setting! setting-key '())
+                      (.addElement model "clear all")))))
+    cb))
+
+(defn http-message-viewer
+  [{:keys [datas setting-key auto-completion-words]
+    :or {auto-completion-words ["request"
+                                "response"
+                                "reverse"
+                                "str/split"
+                                "str/reverse"
+                                "str/includes?"
+                                "re-find"
+                                "re-match"
+                                "first"]}}]
+  (let [auto-completion-words (->> (first @datas)
+                                   keys
+                                   (map str)
+                                   (concat  auto-completion-words))
+        filter-cb (make-ac-combox {:setting-key setting-key
+                                   :item-validation (fn [txt]
+                                                      (prn "validate:" txt)
+                                                      (try (get-filter-pred txt)
+                                                           true
+                                                           (catch Exception e
+                                                             (gui/invoke-later
+                                                              (gui/alert
+                                                               (format "%s error filter expression:%s"
+                                                                       txt
+                                                                       (.getMessage e))))
+                                                             false
+                                                             )))
+                                   :auto-completion {:use-parameter-assistance false
+                                                     :trigger-key "control PERIOD"
+                                                     :activate-delay 10
+                                                     :init-words auto-completion-words}
+                                   })
+        tbl (guix/table-x :id :http-message-table
+                          :selection-mode :single
+                          :model (make-http-message-model (gui/selection filter-cb) @datas))
+        req-resp-controller (helper/make-request-response-controller)]
+    (helper/init req-resp-controller false)
+    (gui/listen tbl :selection
+                (fn [e]
+                  (let [v (some->> (gui/selection tbl)
+                                   (table/value-at tbl))]
+                    ;; (log/info :table :selection "value:" v)
+                    (helper/set-message req-resp-controller v)
+                    )))
+    (gui/listen filter-cb :selection
+                (fn [e]
+                  (log/info "change model:" (gui/selection e))
+                  (->> (make-http-message-model (gui/selection e) @datas)
+                       (gui/config! tbl :model))))
+    (bind/bind
+     datas
+     (bind/transform #(fn [datas]
+                        (log/info "change model:" (gui/selection filter-cb))
+                        (make-http-message-model (gui/selection filter-cb) datas)))
+     (bind/property tbl :model))
+    (gui/top-bottom-split (mig-panel
+                           :items [["filter:"]
+                                   [filter-cb
+                                    "wrap, grow"]
+                                   [(gui/scrollable tbl)
+                                    "wrap, span, grow, width 100%"]])
+                          (gui/left-right-split
+                           (-> (helper/get-request-editor req-resp-controller)
+                               (.getComponent))
+                           (-> (helper/get-response-editor req-resp-controller)
+                               (.getComponent))
+                           :divider-location 1/2)
+                          :divider-location 2/3)))
+
+(comment
+
+  (def hs (extender/get-proxy-history))
+
+  (def datas (map-indexed (fn [idx v]
+                            (let [info (helper/parse-http-req-resp v)]
+                              (assoc info :index idx))) hs))
+
+  (def ds (atom datas))
+
+  (utils/show-ui (http-message-viewer {:datas ds
+                                       :setting-key :add-csrf/macro
+                                       }))
+
+  (helper/set-message e1  (first hs) )
+
+  (helper/set-message e1  (nth hs 2) )
+
+  (def s1 (syntax-editor/syntax-text-area
+           {:auto-completion {:use-parameter-assistance true
+                              :trigger-key "control PERIOD"
+                              :activate-delay 10
+                              :init-words ["request" "response" "defn" "reverse" "str/split"
+                                           "str/reverse"]
+                              :completions {:basic [{:text "test"}
+                                                    {:text "tencent"
+                                                     :desc "tencent test"
+                                                     :summary "test text"}]}}
+            :input-map {"control P" "caret-up"
+                        "control N" "caret-down"
+                        "control B" "caret-backward"
+                        "control F" "caret-forward"
+                        "control A" "caret-begine-line"
+                        "control E" "caret-end-line"
+                        "control D" "delete-next"
+                        "alt B" "caret-previous-word"
+                        "alt F" "caret-next-word"
+                        }
+            }
+           ))
+
+
+  (def acb (make-ac-combox {:setting-key :csrf-filter
+                            :auto-completion {:use-parameter-assistance true
+                                              :trigger-key "control PERIOD"
+                                              :activate-delay 10
+                                              :init-words ["request" "response" "defn" "reverse" "str/split"
+                                                           "str/reverse"]
+                                              :completions {:basic [{:text "test"}
+                                                                    {:text "tencent"
+                                                                     :desc "tencent test"
+                                                                     :summary "test text"}]}}
+                            :item-validation (fn [txt]
+                                               (prn "validate:" txt)
+                                               (try (get-filter-pred txt)
+                                                    true
+                                                    (catch Exception e
+                                                      (gui/invoke-later
+                                                       (gui/alert
+                                                        (format "%s error filter expression:%s"
+                                                                txt
+                                                                (.getMessage e))))
+                                                      false
+                                                      )))
+                            }))
+
+
+  (utils/show-ui acb)
+
+
+
+
+
+
+  )
 
 (defn extract-csrf-token
   [body]
