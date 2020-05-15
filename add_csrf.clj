@@ -3,6 +3,7 @@
             [taoensso.timbre :as log]
             [seesaw.swingx :as guix]
             [seesaw.rsyntax :as rsyntax]
+            [seesaw.font :as font]
             [seesaw.table :as table]
             [seesaw.bind :as bind]
             [seesaw.mig :refer [mig-panel]]
@@ -46,55 +47,92 @@
 
 (defn make-http-message-model
   [filter-pred datas]
-  (table/table-model :columns http-message-cols-info
-                     :rows (try
-                             (-> (try (get-filter-pred filter-pred)
-                                      (catch Exception e
-                                        (constantly false)))
-                                 (filter datas)
-                                 doall)
-                             (catch Exception e
-                               (log/error :make-http-message-model e)))))
+  (let [pred-fn (try (get-filter-pred filter-pred)
+                     (catch Exception e
+                       (constantly false)))
+        pred (fn [data]
+               (helper/with-exception-default nil
+                 (pred-fn data)))]
+    (table/table-model :columns http-message-cols-info
+                       :rows (filter pred datas))))
+
+(defn make-syntax-combox-editor
+  [syntax-text-area]
+  (let [actions (atom #{})]
+    (keymap/map-key syntax-text-area
+                    "control ENTER" (fn [e]
+                                      (doseq [a @actions]
+                                        (.actionPerformed a e)))
+                    :scope :self)
+    (reify ComboBoxEditor
+      (addActionListener [this listener]
+        (swap! actions conj listener))
+      (removeActionListener [this listener]
+        (swap! actions disj listener))
+      (getEditorComponent [this]
+        syntax-text-area)
+      (selectAll [this]
+        (.selectAll syntax-text-area))
+      (setItem [this obj]
+        (.setText syntax-text-area obj))
+      (getItem [this]
+        (.getText syntax-text-area)))))
 
 (defn make-ac-combox
-  [{:keys [setting-key auto-completion item-validation]
-    :or {item-validation identity}}]
+  [{:keys [setting-key auto-completion item-validation editor-options]
+    :or {item-validation identity
+         editor-options [:wrap-lines? true
+                         :font (font/font :font :monospaced
+                                          :size 20)
+                         ]}}]
   (let [datas (extender/get-setting setting-key)
         cb (gui/combobox :model datas
                          :editable? true)
         model (.getModel cb)
-        editor (-> (.getEditor cb)
-                   (.getEditorComponent))]
+        editor (apply syntax-editor/syntax-text-area
+                      {:auto-completion auto-completion
+                       :input-map {"control P" "caret-up"
+                                   "control N" "caret-down"
+                                   "control B" "caret-backward"
+                                   "control F" "caret-forward"
+                                   "control A" "caret-begin-line"
+                                   "control E" "caret-end-line"
+                                   "control D" "delete-next"
+                                   "control K" "RTA.DeleteRestOfLineAction"
+                                   "alt K" "RTA.DeleteLineAction"
+                                   "alt B" "caret-previous-word"
+                                   "alt F" "caret-next-word"
+                                   }}
+                      editor-options)
+        combox-editor (make-syntax-combox-editor editor)]
     (->> (.getSize model)
          (.insertElementAt model "clear all"))
-    (when auto-completion
-      (-> (syntax-editor/make-completion auto-completion)
-          (.install editor)))
-    (keymap/map-key editor
-                    "ENTER" (fn [e]
-                              (let [txt (gui/text e)]
-                                (cond
-                                  (empty? txt)
-                                  (->> (border/line-border :color Color/RED)
-                                       (.setBorder editor))
+    (.addActionListener combox-editor
+                        (gui/action
+                         :name "check syntax"
+                         :handler (fn [e]
+                                    (let [txt (gui/text e)]
+                                      (cond
+                                        (empty? txt)
+                                        (->> (border/line-border :color Color/RED)
+                                             (.setBorder editor))
 
-                                  (= (.getElementAt model 0) txt)
-                                  (->> (border/empty-border)
-                                       (.setBorder editor))
+                                        (= (.getElementAt model 0) txt)
+                                        (->> (border/empty-border)
+                                             (.setBorder editor))
 
-                                  (item-validation txt)
-                                  (do
-                                    (->> (border/line-border :color Color/GREEN)
-                                         (.setBorder editor))
-                                    (extender/update-setting! setting-key #(cons txt %1) )
-                                    (.insertElementAt model txt 0)
-                                    (.setSelectedItem model txt))
+                                        (item-validation txt)
+                                        (do
+                                          (->> (border/line-border :color Color/GREEN)
+                                               (.setBorder editor))
+                                          (extender/update-setting! setting-key #(cons txt %1) )
+                                          (.insertElementAt model txt 0)
+                                          (.setSelectedItem model txt))
 
-                                  :else
-                                  (->> (border/line-border :color Color/RED)
-                                       (.setBorder editor))
-                                  )))
-                    :scope :self)
+                                        :else
+                                        (->> (border/line-border :color Color/RED)
+                                             (.setBorder editor))
+                                        )))))
     (gui/listen cb :selection
                 (fn [e]
                   (let [exp (gui/selection cb)]
@@ -105,6 +143,7 @@
                       (.removeAllElements model)
                       (extender/set-setting! setting-key '())
                       (.addElement model "clear all")))))
+    (.setEditor cb combox-editor)
     cb))
 
 (defn http-message-viewer
@@ -115,16 +154,18 @@
                                 "str/split"
                                 "str/reverse"
                                 "str/includes?"
+                                "utils/try-parse-int"
+                                "utils/try-parse-long"
                                 "re-find"
                                 "re-match"
-                                "first"]}}]
+                                "first"
+                                "msg"]}}]
   (let [auto-completion-words (->> (first @datas)
                                    keys
                                    (map str)
                                    (concat  auto-completion-words))
         filter-cb (make-ac-combox {:setting-key setting-key
                                    :item-validation (fn [txt]
-                                                      (prn "validate:" txt)
                                                       (try (get-filter-pred txt)
                                                            true
                                                            (catch Exception e
@@ -132,13 +173,15 @@
                                                               (gui/alert
                                                                (format "%s error filter expression:%s"
                                                                        txt
-                                                                       (.getMessage e))))
+                                                                       e)))
                                                              false
                                                              )))
                                    :auto-completion {:use-parameter-assistance false
                                                      :trigger-key "control PERIOD"
                                                      :activate-delay 10
                                                      :init-words auto-completion-words}
+                                   :editor-options [:syntax :clojure
+                                                    :rows 3]
                                    })
         tbl (guix/table-x :id :http-message-table
                           :selection-mode :single
@@ -164,18 +207,19 @@
                         (make-http-message-model (gui/selection filter-cb) datas)))
      (bind/property tbl :model))
     (gui/top-bottom-split (mig-panel
-                           :items [["filter:"]
+                           :items [["Filter:"]
                                    [filter-cb
                                     "wrap, grow"]
                                    [(gui/scrollable tbl)
-                                    "wrap, span, grow, width 100%"]])
+                                    "wrap, span, grow, hmin 500, width 100%, height 100%"]])
                           (gui/left-right-split
                            (-> (helper/get-request-editor req-resp-controller)
                                (.getComponent))
                            (-> (helper/get-response-editor req-resp-controller)
                                (.getComponent))
                            :divider-location 1/2)
-                          :divider-location 2/3)))
+                          :divider-location 2/3
+                          :preferred-size [1000 :by 600])))
 
 (comment
 
