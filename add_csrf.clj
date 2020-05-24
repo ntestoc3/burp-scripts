@@ -12,6 +12,8 @@
             [burp-clj.utils :as utils]
             [burp-clj.helper :as helper]
             [burp-clj.extender :as extender]
+            [burp-clj.ui :as ui]
+            [burp-clj.http :refer [make-http-proc]]
             [burp-clj.scripts :as scripts]
             [burp-clj.message-viewer :as message-viewer]
             [burp-clj.proxy :as proxy]
@@ -20,39 +22,6 @@
 
 (utils/add-dep '[[clj-http "3.10.1"]])
 (require '[clj-http.client :as http])
-
-(def cols-info [{:key :index :text "#" :class java.lang.Long}
-                {:key :host :text "Host" :class java.lang.String}
-                {:key :request/url :text "URL" :class java.lang.String}
-                {:key :response/status :text "Resp.Status" :class java.lang.Long}
-                {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
-                {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
-                {:key :port :text "PORT" :class java.lang.Long}
-                {:key :comment :text "Comment" :class java.lang.String}])
-
-
-(comment
-
-  (def hs (extender/get-proxy-history))
-
-  (def datas (map-indexed (fn [idx v]
-                            (let [info (helper/parse-http-req-resp v)]
-                              (assoc info :index idx))) hs))
-
-  (def ds (atom datas))
-
-  (utils/show-ui (message-viewer/http-message-viewer
-                  {:datas ds
-                   :columns cols-info
-                   :setting-key :add-csrf/macro
-                   }))
-
-  (helper/set-message e1  (first hs) )
-
-  (helper/set-message e1  (nth hs 2) )
-
-
-  )
 
 (defn extract-csrf-token
   [body]
@@ -101,20 +70,75 @@
                   (.setRequest curr-req)))
          (do (log/warn :set-csrf-token "not found csrf token, response:" resp)))))))
 
-(defn make-action
-  []
-  (reify ISessionHandlingAction
-    (getActionName [this]
-      "add X-CSRF-Token")
-    (performAction [this curr-req macros]
-      (when-let [last (last macros)]
-        (set-csrf-token {:curr-req curr-req
-                         :last-req last})))))
+(def state (atom {:tools-scope #{:repeater :extender}
+                  :url-scope {:include #{".*" }}}))
+
+(def scope-cols [{:key :enabled :text "Enabled" :class Boolean}
+                 {:key :filter :text "Filter" :class String}])
+
+(defn make-scope-table
+  [data-atom]
+  (let [table (gui/table :model (table/table-model :columns scope-cols
+                                                   :rows @data-atom))]
+    (bind/bind
+     data-atom
+     (bind/transform #(table/table-model :columns scope-cols
+                                         :rows %1))
+     (bind/property table :model))
+    (-> (.getColumnModel table)
+        (.getColumn 0)
+        (.setPreferredWidth 5))
+    table))
+
+(defn scope-form
+  [{:keys [title data-atom]}]
+  (mig-panel
+   :items [[(ui/make-header {:text title
+                             :size 12
+                             :bold false})
+            "span, grow, wrap"]
+
+           [(gui/button :text "Add"
+                        :listen [:action
+                                 (fn [e]
+                                   (when-let [scope (ui/input {:title "Add scope URL"
+                                                               :text "Specify regex for url match:"})]
+                                     (swap! data-atom conj scope)
+                                     ))])
+            "grow"]
+
+           [(gui/scrollable (source-list))
+            "spany 5, grow, wrap, wmin 500"]
+
+           [(gui/button :text "Remove"
+                        :listen [:action
+                                 (fn [e]
+                                   (when-let [sel (-> (gui/to-root e)
+                                                      (gui/select [:#script-source])
+                                                      (gui/selection)
+                                                      )]
+                                     (log/info "remove script source:" sel)
+                                     (script/remove-script-source! sel)))])
+            "grow, wrap"]
+
+           [(gui/button :text "Reload Scripts!"
+                        :listen [:action (fn [e]
+                                           (gui/invoke-later
+                                            (script/reload-sources!)))])
+            "grow,wrap"]
+           ])
+  )
+
+(defn add-csrf-proc
+  [{:keys [tool is-request msg]}]
+  (when is-request
+
+    ))
 
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
-                               :version "0.0.1"
+                               :version "0.1.0"
                                :min-burp-clj-version "0.3.1"
-                               :session-handling-action {:add-csrf/action
-                                                         (make-action)}
+                               :http-listener {:add-csrf/http-listener
+                                               (make-http-proc add-csrf-proc)}
                                }))
