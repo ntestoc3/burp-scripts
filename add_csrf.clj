@@ -106,7 +106,7 @@
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
                                :version "0.1.2"
-                               :min-burp-clj-version "0.3.1"
+                               :min-burp-clj-version "0.3.5"
                                :http-listener {:add-csrf/http-listener
                                                (make-http-proc add-csrf-proc)}
                                :context-menu {:add-csrf/context-menu (set-url-menu)}
