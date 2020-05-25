@@ -14,6 +14,7 @@
             [burp-clj.extender :as extender]
             [burp-clj.ui :as ui]
             [burp-clj.http :refer [make-http-proc]]
+            [burp-clj.context-menu :as context-menu]
             [burp-clj.scripts :as scripts]
             [burp-clj.message-viewer :as message-viewer]
             [burp-clj.proxy :as proxy]
@@ -42,103 +43,71 @@
      (log/info :send-request "return:" (:status r))
      r)))
 
+(defn get-url-host
+  [url]
+  (-> (java.net.URL. url)
+      (.getHost)))
+
 (defn set-csrf-token
   "设置`curr-req` csrf token"
-  ([{:keys [follow-redirect curr-req last-req]
-     :or {follow-redirect true}}]
-   (when-let [resp-info (-> (.getResponse last-req)
-                            (utils/parse-response))]
-     (let [service (-> (.getHttpService curr-req)
-                       (helper/parse-http-service))
-           req-info (-> (.getRequest curr-req)
-                        (utils/parse-request (= "https" (:protocol service))))
-           resp (if (and follow-redirect
-                         (#{301 302} (:status resp-info)))
-                  ;; 重定向引发循环调用session action的问题，不容易解决，
-                  ;; 自己实现发送请求,绕过burp
-                  (let [location (get-in resp-info [:headers :location])]
-                    (log/info :get-csrf-token "redirect to:" location)
-                    (send-request (assoc req-info
-                                         :url location
-                                         :throw-exceptions false)))
-                  resp-info)]
-       (if-let [csrf-token (extract-csrf-token (:body resp))]
-         (do (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
-             (->> (assoc-in req-info [:headers :x-csrf-token] csrf-token)
-                  (utils/build-request)
-                  (.getBytes)
-                  (.setRequest curr-req)))
-         (do (log/warn :set-csrf-token "not found csrf token, response:" resp)))))))
+  [curr-req csrf-url]
+  (let [req-info (utils/parse-request curr-req)]
+    (when (= (:host req-info)
+             (get-url-host csrf-url))
+        (let [resp (send-request (assoc req-info
+                                        :url csrf-url
+                                        :throw-exceptions false)
+                                 true)
+              csrf-token (extract-csrf-token (:body resp))]
+          (if csrf-token
+            (do (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
+                (->> (assoc-in req-info [:headers :x-csrf-token] csrf-token)
+                     (utils/build-request)
+                     (.getBytes)
+                     (.setRequest curr-req)))
+            (do (log/warn :set-csrf-token "not found csrf token for:" (:url req-info))))))))
 
-(def state (atom {:tools-scope #{:repeater :extender}
-                  :url-scope {:include #{".*" }}}))
+(def tool-scope #{:extender
+                  :repeater
+                  :scanner
+                  :target
+                  :sequencer
+                  :intruder
+                  })
 
-(def scope-cols [{:key :enabled :text "Enabled" :class Boolean}
-                 {:key :filter :text "Filter" :class String}])
-
-(defn make-scope-table
-  [data-atom]
-  (let [table (gui/table :model (table/table-model :columns scope-cols
-                                                   :rows @data-atom))]
-    (bind/bind
-     data-atom
-     (bind/transform #(table/table-model :columns scope-cols
-                                         :rows %1))
-     (bind/property table :model))
-    (-> (.getColumnModel table)
-        (.getColumn 0)
-        (.setPreferredWidth 5))
-    table))
-
-(defn scope-form
-  [{:keys [title data-atom]}]
-  (mig-panel
-   :items [[(ui/make-header {:text title
-                             :size 12
-                             :bold false})
-            "span, grow, wrap"]
-
-           [(gui/button :text "Add"
-                        :listen [:action
-                                 (fn [e]
-                                   (when-let [scope (ui/input {:title "Add scope URL"
-                                                               :text "Specify regex for url match:"})]
-                                     (swap! data-atom conj scope)
-                                     ))])
-            "grow"]
-
-           [(gui/scrollable (source-list))
-            "spany 5, grow, wrap, wmin 500"]
-
-           [(gui/button :text "Remove"
-                        :listen [:action
-                                 (fn [e]
-                                   (when-let [sel (-> (gui/to-root e)
-                                                      (gui/select [:#script-source])
-                                                      (gui/selection)
-                                                      )]
-                                     (log/info "remove script source:" sel)
-                                     (script/remove-script-source! sel)))])
-            "grow, wrap"]
-
-           [(gui/button :text "Reload Scripts!"
-                        :listen [:action (fn [e]
-                                           (gui/invoke-later
-                                            (script/reload-sources!)))])
-            "grow,wrap"]
-           ])
-  )
+(def csrf-url (atom nil))
 
 (defn add-csrf-proc
   [{:keys [tool is-request msg]}]
-  (when is-request
+  (when (and is-request
+             (tool-scope tool))
+    (when-let [url @csrf-url]
+      (set-csrf-token msg url))))
 
-    ))
+(def menu-context #{:message-editor-request
+                    :message-editor-response
+                    :proxy-history
+                    :target-site-map-tree
+                    :message-viewer-request
+                    :message-viewer-response})
+
+(defn set-url-menu []
+  (context-menu/make-context-menu
+   menu-context
+   (fn [invocation]
+     (when-let [msgs (context-menu/get-selected-messge invocation)]
+       [(gui/menu-item :text "Set CSRF URL"
+                       :listen [:action (fn [e]
+                                          (when-let [data (-> (first msgs)
+                                                              (.getRequest)
+                                                              utils/parse-request)]
+                                            (reset! csrf-url (:url data))))])]))))
 
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
-                               :version "0.1.0"
+                               :version "0.1.2"
                                :min-burp-clj-version "0.3.1"
                                :http-listener {:add-csrf/http-listener
                                                (make-http-proc add-csrf-proc)}
+                               :context-menu {:add-csrf/context-menu (set-url-menu)}
                                }))
