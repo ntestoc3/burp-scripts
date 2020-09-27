@@ -145,8 +145,22 @@
                               {:name "clojure nrepl server"
                                :version "0.0.1"
                                :min-burp-clj-version "0.1.1"
+
+                               ;; 启用脚本时执行
                                :enable-callback (fn [_] (start-nrepl))
+
+                               ;; 禁用脚本时执行
                                :disable-callback (fn [_] (stop-nrepl))
-                               :tab {:nrepl-main {:captain "nREPL"
-                                                  :view (make-nrepl-view)}}
+
+                               ;; 添加tab
+                               :tab {:nrepl-main ;; tab的key,必须全局唯一
+
+                                     {;; 标题
+                                      :captain "nREPL"
+
+                                      ;; gui视图
+                                      :view (make-nrepl-view)}
+
+                                     ;; 可以添加更多的tab,使用不同的key
+                                     }
                                }))

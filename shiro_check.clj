@@ -33,7 +33,7 @@
 (defn shiro-check-proxy []
   (proxy/make-proxy-proc shiro-check))
 
-(def reg (scripts/reg-script! :shiro-check ;; 脚本唯一id,执行多次同一个id会被覆盖
+(def reg (scripts/reg-script! :shiro-check ;; 脚本唯一id,如果执行多次,最后一次执行的生效
                               {:name "jsp shiro check" ;; 脚本名字
                                :version "0.0.1" ;; 当前版本号
                                :min-burp-clj-version "0.1.1" ;; burp-clj最低版本号
