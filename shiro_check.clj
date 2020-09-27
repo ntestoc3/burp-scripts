@@ -33,9 +33,15 @@
 (defn shiro-check-proxy []
   (proxy/make-proxy-proc shiro-check))
 
-(def reg (scripts/reg-script! :shiro-check
-                              {:name "jsp shiro check"
-                               :version "0.0.1"
-                               :min-burp-clj-version "0.1.1"
-                               :proxy-listener {:shiro-check/cookie-check (shiro-check-proxy)}
+(def reg (scripts/reg-script! :shiro-check ;; 脚本唯一id,执行多次同一个id会被覆盖
+                              {:name "jsp shiro check" ;; 脚本名字
+                               :version "0.0.1" ;; 当前版本号
+                               :min-burp-clj-version "0.1.1" ;; burp-clj最低版本号
+
+                               ;; 添加 proxy listener
+                               :proxy-listener {:shiro-check/cookie-check ;; proxy listener的key,自己指定，不过所有脚本的key不能有重复，建议使用带命名空间的keyword
+                                                (shiro-check-proxy)
+
+                                                ;; 可以指定多个proxy listener, 使用不同的key即可
+                                                }
                                }))
