@@ -11,7 +11,7 @@
   (payload/make-payload-generator-factory
    "test-generator"
    (fn [_]
-     (payload/make-simple-payload-generator [1 3 5 7 9 10 false "hahah" nil 999]))))
+     (payload/make-simple-payload-generator [1 3 5 7 9 10 false "hahah" "null" 999]))))
 
 (def reg (scripts/reg-script! :test-payload-gen
                               {:name "test-payload-generator"

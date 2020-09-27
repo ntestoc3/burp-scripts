@@ -14,9 +14,9 @@
             [taoensso.timbre :as log]))
 
 (extender/defsetting :nrepl-server/port 2233 validate/valid-port?)
-(extender/defsetting :nrepl/nrepl-version "0.7.0")
+(extender/defsetting :nrepl/nrepl-version "0.8.2")
 (extender/defsetting :nrepl/refactor-version "2.5.0")
-(extender/defsetting :nrepl/cider-version "0.25.0-alpha1")
+(extender/defsetting :nrepl/cider-version "0.25.3")
 
 (defn load-deps
   []
