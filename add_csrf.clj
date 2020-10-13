@@ -18,8 +18,7 @@
             [burp-clj.scripts :as scripts]
             [burp-clj.message-viewer :as message-viewer]
             [burp-clj.proxy :as proxy]
-            [seesaw.core :as gui])
-  (:import [burp ISessionHandlingAction]))
+            [seesaw.core :as gui]))
 
 (utils/add-dep '[[clj-http "3.10.1"]])
 (require '[clj-http.client :as http])

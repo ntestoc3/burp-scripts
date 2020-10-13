@@ -15,10 +15,13 @@
   (when is-req
     (let [req-resp (.getMessageInfo msg)
           ip (-> (.getHttpService req-resp)
-                 (.getHost))
-          ip-geo (qqwry/get-location ip)
-          ip-loc-str (str (:county ip-geo) " -- " (:area ip-geo) " " (.getComment req-resp))]
-      (.setComment req-resp ip-loc-str))))
+                 (.getHost))]
+      (try (let [ip-geo (qqwry/get-location ip)
+                 ip-loc-str (str (:county ip-geo) " -- " (:area ip-geo) " "
+                                 (.getComment req-resp))]
+             (.setComment req-resp ip-loc-str))
+           (catch Exception e
+             (log/error "ip loc for:" (.getUrl req-resp) "ip:" ip))))))
 
 (defn ip-loc-proxy []
   (proxy/make-proxy-proc ip-loc))
