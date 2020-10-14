@@ -170,7 +170,7 @@
   {:pre (s/valid? :burp/issue info)}
   (reify IScanIssue
     (getConfidence [this] (confidence-type (:confidence info)))
-    (getHttpMessages [this] (:http-messages info))
+    (getHttpMessages [this] (to-array (:http-messages info)))
     (getHttpService [this] (:http-service info))
     (getIssueBackground [this] (:background info))
     (getIssueDetail [this] (:detail info))
@@ -245,7 +245,7 @@
                            :name "js links finder"
                            :confidence :certain
                            :severity :info
-                           :http-messages (into-array [req-resp])
+                           :http-messages [req-resp]
                            :http-service service
                            :background "JS files holds links to other parts of web applications. Refer to TAB for results."
                            :remediation-background "js links finder is an <b>informational</b> finding only.<br>"
@@ -288,7 +288,7 @@
                              (doseq [row (link-list-row-indexes)]
                                (let [new-link (-> (table/value-at link-list row)
                                                   :link
-                                                  (str/replace #"^[\.\/]+" ""))]
+                                                  (str/replace #"^[^a-zA-Z0-9_]+" ""))]
                                  (table/update-at! link-list row {:link new-link}))))
         find-empty-or-dup-rows (fn []
                                  (->> (link-list-row-indexes)
@@ -301,15 +301,13 @@
                                                     [empty-or-dup-rows (conj uniq-links l)])))
                                               [[] #{}])
                                       first))
-        sort-link-list (fn []
-                         (-> (.getRowSorter link-list)
-                             (.toggleSortOrder 0)))
         remove-all-leading (fn [e]
                              (update-leadings-fn)
                              (let [empty-or-dup-rows (find-empty-or-dup-rows)]
                                (when-not (empty? empty-or-dup-rows)
                                  (apply table/remove-at! link-list empty-or-dup-rows)))
-                             (sort-link-list))
+                             (-> (.getModel link-list)
+                                 (.fireTableDataChanged)))
 
         copy-action (gui/action :handler (fn [e]
                                            (-> (gui/selection link-list {:multi? true})
@@ -370,7 +368,8 @@
                              add-model-listener
                              (gui/config! link-list :model))
                     (update-total-label nil)
-                    (sort-link-list))))
+                    (-> (.getRowSorter link-list)
+                        (.toggleSortOrder 0)))))
     (gui/listen link-list :selection
                 (fn [e]
                   (if (gui/selection link-list)
