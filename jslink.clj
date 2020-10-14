@@ -76,7 +76,7 @@
            set))
 
 ;;;; scanner check and gui
-(def logs (atom {}))
+(defonce logs (atom {}))
 
 (def js-exclusion-list ["jquery"
                         "google-analytics"
