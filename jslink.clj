@@ -17,8 +17,10 @@
             [seesaw.keymap :refer [map-key]]
             [taoensso.timbre :as log]
             [clojure.string :as str]
-            [clojure.set :as set])
-  (:import [burp IScanIssue IScannerCheck IHttpRequestResponse IHttpService]))
+            [clojure.set :as set]
+            [seesaw.table :as table])
+  (:import [burp IScanIssue IScannerCheck IHttpRequestResponse IHttpService]
+           [javax.swing.event TableModelEvent TableModelListener]))
 
 ;;;;;; link parser
 (def str-delimiter "(?:\"|')")
@@ -254,38 +256,96 @@
   []
   (make-scanner-check {:passive-scan-fn passive-scan}))
 
-(def view-links (atom #{}))
+(defn make-links-model
+  [links]
+  (table/table-model :columns [{:key :link :text "link"}]
+                     :rows (map #(hash-map :link %1) links)))
+
+(defn make-table-model-listener
+  [table-changed-fn]
+  (reify TableModelListener
+    (tableChanged [this e]
+      (table-changed-fn e))))
 
 (defn make-jslink-view
   []
   (let [url-list (guix/listbox-x :sort-order :ascending
                                  :model (keys @logs))
-        link-list (gui/listbox)
-        copy-select-fn (fn [e]
-                         (->> (gui/selection link-list {:multi? true})
-                              (str/join "\n")
-                              (clip/contents!)))
-        copy-all-fn (fn [e]
-                      (->> @view-links
-                           (str/join "\n")
-                           (clip/contents!)))
+        link-list (gui/table :id :link-list)
+        copy-links-fn (fn [rows]
+                        (->> (table/value-at link-list rows)
+                             (map :link)
+                             (str/join "\n")
+                             (clip/contents!)))
         remove-select-fn (fn [e]
                            (->> (gui/selection link-list {:multi? true})
-                                (swap! view-links set/difference)))
-        copy-action (gui/action :handler copy-select-fn
-                                :name "Copy"
+                                sort
+                                (apply table/remove-at! link-list)))
+        link-list-row-indexes (fn []
+                                (->> (table/row-count link-list)
+                                     range))
+        update-leadings-fn (fn []
+                             (doseq [row (link-list-row-indexes)]
+                               (let [new-link (-> (table/value-at link-list row)
+                                                  :link
+                                                  (str/replace #"^[\.\/]+" ""))]
+                                 (table/update-at! link-list row {:link new-link}))))
+        find-empty-or-dup-rows (fn []
+                                 (->> (link-list-row-indexes)
+                                      (reduce (fn [[empty-or-dup-rows uniq-links] row]
+                                                (let [l (-> (table/value-at link-list row)
+                                                            :link)]
+                                                  (if (or (empty? l)
+                                                          (uniq-links l))
+                                                    [(conj empty-or-dup-rows row) uniq-links]
+                                                    [empty-or-dup-rows (conj uniq-links l)])))
+                                              [[] #{}])
+                                      first))
+        sort-link-list (fn []
+                         (-> (.getRowSorter link-list)
+                             (.toggleSortOrder 0)))
+        remove-all-leading (fn [e]
+                             (update-leadings-fn)
+                             (let [empty-or-dup-rows (find-empty-or-dup-rows)]
+                               (when-not (empty? empty-or-dup-rows)
+                                 (apply table/remove-at! link-list empty-or-dup-rows)))
+                             (sort-link-list))
+
+        copy-action (gui/action :handler (fn [e]
+                                           (-> (gui/selection link-list {:multi? true})
+                                               copy-links-fn))
+                                :name "复制"
                                 :enabled? false
-                                :tip "Copy selected items")
+                                :tip "复制选中链接")
         remove-action (gui/action :handler remove-select-fn
-                                  :name "Remove"
+                                  :name "删除"
                                   :enabled? false
-                                  :tip "Remove selected items")
-        copy-all-action (gui/action :handler copy-all-fn
-                                    :name "Copy All"
-                                    :tip "Copy all items")]
-    (map-key link-list "ctrl C" copy-select-fn)
-    (map-key link-list "ctrl A" copy-all-fn)
-    (map-key link-list "ctrl D" remove-select-fn)
+                                  :tip "删除选中链接(临时删除列表中显示的链接)")
+        copy-all-action (gui/action :handler (fn [e]
+                                               (-> (table/row-count link-list)
+                                                   range
+                                                   copy-links-fn))
+                                    :name "全部复制"
+                                    :tip "复制所有链接")
+        link-list-panel  (mig-panel
+                          :constraints [""
+                                        "[][fill,grow]"
+                                        "[][fill,grow]"]
+                          :items [["总计:"]
+                                  [(gui/label :id :lbl-total
+                                              :text "")]
+                                  [(gui/button :text "删除链接前面的./字符"
+                                               :tip "删除所有链接最开头的./字符"
+                                               :listen [:action remove-all-leading])
+                                   "wrap, growx"]
+
+                                  [(gui/scrollable link-list)
+                                   "span, grow"]])
+        update-total-label (fn [e]
+                             (-> (gui/select link-list-panel [:#lbl-total])
+                                 (gui/config! :text (table/row-count link-list))))]
+    (.setTableHeader link-list nil)
+    (.setAutoCreateRowSorter link-list true)
     (bind/bind
      logs
      (bind/transform keys)
@@ -298,24 +358,31 @@
                           remove-action]))
     (gui/listen url-list :selection
                 (fn [e]
-                  (some->> (gui/selection url-list {:multi? true})
-                           (select-keys @logs)
-                           vals
-                           (reduce into #{})
-                           (reset! view-links))))
+                  (let [add-model-listener (fn [model]
+                                             (->> (make-table-model-listener update-total-label)
+                                                  (.addTableModelListener model))
+                                             model)]
+                    (some->> (gui/selection url-list {:multi? true})
+                             (select-keys @logs)
+                             vals
+                             (reduce into #{})
+                             make-links-model
+                             add-model-listener
+                             (gui/config! link-list :model))
+                    (update-total-label nil)
+                    (sort-link-list))))
     (gui/listen link-list :selection
                 (fn [e]
                   (if (gui/selection link-list)
                     (gui/config! [copy-action remove-action] :enabled? true)
                     (gui/config! [copy-action remove-action] :enabled? false))))
-    (bind/bind
-     view-links
-     (bind/property link-list :model))
     (gui/left-right-split (gui/scrollable url-list)
-                          (gui/scrollable link-list))))
+                          link-list-panel)))
 
 (comment
-  (utils/show-ui (make-jslink-view))
+  (def f (make-jslink-view))
+
+  (utils/show-ui f)
 
   )
 ;;;; extension
