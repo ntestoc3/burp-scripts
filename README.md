@@ -16,3 +16,13 @@
 ## ip-loc 
 
 comment中添加ip地址显示
+
+## jslink
+
+查找js文件中的链接,方便处理和复制，用作burp Intruder的payload
+
+感谢 https://github.com/portswigger/js-link-finder 的burp插件思路
+
+感谢 https://github.com/GerbenJavado/LinkFinder 的正则表达式
+
+
