@@ -9,11 +9,15 @@
             [clojure.spec.alpha :as s]
             [seesaw.core :as gui]
             [seesaw.bind :as bind]
+            [seesaw.swingx :as guix]
             [seesaw.clipboard :as clip]
             [seesaw.border :as border]
             [seesaw.mig :refer [mig-panel]]
+            [seesaw.keystroke :refer [keystroke]]
+            [seesaw.keymap :refer [map-key]]
             [taoensso.timbre :as log]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.set :as set])
   (:import [burp IScanIssue IScannerCheck IHttpRequestResponse IHttpService]))
 
 ;;;;;; link parser
@@ -73,7 +77,7 @@
   [s]
   (some->> (re-seq rs s)
            (map second)
-           distinct))
+           set))
 
 (comment
   ;; test parse
@@ -204,7 +208,7 @@
       (passive-scan-fn req-resp))))
 
 ;;;; scanner-check and gui
-(def logs (atom ""))
+(def logs (atom {}))
 
 (def js-exclusion-list ["jquery"
                         "google-analytics"
@@ -230,15 +234,11 @@
   (let [service (.getHttpService req-resp)
         url (-> (.getUrl req-resp)
                 str)]
-    (log/info :passive-scan-check url)
     (when (str/includes? url ".js")
       (if (exclusion-js? url)
-        (swap! logs str "\n[-] exclude url:" url)
+        (log/info "[jslink] exclude url:" url)
         (when-let [links (scan-resp-links req-resp)]
-          (->> (str "[+] scanned js links:" url)
-               (conj links)
-               (str/join "\n    ")
-               (swap! logs str "\n"))
+          (swap! logs assoc url links)
           (-> (make-issue {:url (.getUrl req-resp)
                            :name "js links finder"
                            :confidence :certain
@@ -254,18 +254,70 @@
   []
   (make-scanner-check {:passive-scan-fn passive-scan}))
 
+(def view-links (atom #{}))
+
 (defn make-jslink-view
   []
-  (let [txt (gui/text :text ""
-                      :multi-line? true
-                      :editable? false)]
+  (let [url-list (guix/listbox-x :sort-order :ascending
+                                 :model (keys @logs))
+        link-list (gui/listbox)
+        copy-select-fn (fn [e]
+                         (->> (gui/selection link-list {:multi? true})
+                              (str/join "\n")
+                              (clip/contents!)))
+        copy-all-fn (fn [e]
+                      (->> @view-links
+                           (str/join "\n")
+                           (clip/contents!)))
+        remove-select-fn (fn [e]
+                           (->> (gui/selection link-list {:multi? true})
+                                (swap! view-links set/difference)))
+        copy-action (gui/action :handler copy-select-fn
+                                :name "Copy"
+                                :enabled? false
+                                :tip "Copy selected items")
+        remove-action (gui/action :handler remove-select-fn
+                                  :name "Remove"
+                                  :enabled? false
+                                  :tip "Remove selected items")
+        copy-all-action (gui/action :handler copy-all-fn
+                                    :name "Copy All"
+                                    :tip "Copy all items")]
+    (map-key link-list "ctrl C" copy-select-fn)
+    (map-key link-list "ctrl A" copy-all-fn)
+    (map-key link-list "ctrl D" remove-select-fn)
     (bind/bind
      logs
-     (bind/property txt :text))
-    (gui/scrollable txt)))
+     (bind/transform keys)
+     (bind/property url-list :model))
+    (gui/config! link-list :popup
+                 (gui/popup
+                  :items [copy-action
+                          copy-all-action
+                          (gui/separator)
+                          remove-action]))
+    (gui/listen url-list :selection
+                (fn [e]
+                  (some->> (gui/selection url-list {:multi? true})
+                           (select-keys @logs)
+                           vals
+                           (reduce into #{})
+                           (reset! view-links))))
+    (gui/listen link-list :selection
+                (fn [e]
+                  (if (gui/selection link-list)
+                    (gui/config! [copy-action remove-action] :enabled? true)
+                    (gui/config! [copy-action remove-action] :enabled? false))))
+    (bind/bind
+     view-links
+     (bind/property link-list :model))
+    (gui/left-right-split (gui/scrollable url-list)
+                          (gui/scrollable link-list))))
 
+(comment
+  (utils/show-ui (make-jslink-view))
 
-
+  )
 ;;;; extension
 
 (def reg (scripts/reg-script! :jslink
