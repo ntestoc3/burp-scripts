@@ -20,7 +20,7 @@
             [burp-clj.proxy :as proxy]
             [seesaw.core :as gui]))
 
-(utils/add-dep '[[clj-http "3.10.1"]])
+(helper/add-dep-with-proxy '[[clj-http "3.10.1"]])
 (require '[clj-http.client :as http])
 
 (defn extract-csrf-token

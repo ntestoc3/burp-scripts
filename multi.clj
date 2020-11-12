@@ -8,7 +8,7 @@
 
 
 (comment
-  (utils/add-dep '[[com.climate/claypoole "1.1.4"]])
+  (helper/add-dep-with-proxy '[[com.climate/claypoole "1.1.4"]])
   (require '[com.climate.claypoole :as cp])
 
 

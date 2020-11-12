@@ -3,10 +3,11 @@
             [taoensso.timbre :as log]
             [burp-clj.utils :as utils]
             [burp-clj.scripts :as scripts]
-            [burp-clj.proxy :as proxy]))
+            [burp-clj.proxy :as proxy]
+            [burp-clj.helper :as helper]))
 
 
-(utils/add-dep '[[ntestoc3/netlib "0.3.4-SNAPSHOT"]])
+(helper/add-dep-with-proxy '[[ntestoc3/netlib "0.3.5-SNAPSHOT"]])
 (require '[netlib.qqwry :as qqwry])
 
 

@@ -20,9 +20,9 @@
 
 (defn load-deps
   []
-  (utils/add-dep [['nrepl (get-nrepl-version)]
-                  ['refactor-nrepl (get-refactor-version)]
-                  ['cider/cider-nrepl (get-cider-version)]]))
+  (helper/add-dep-with-proxy [['nrepl (get-nrepl-version)]
+                              ['refactor-nrepl (get-refactor-version)]
+                              ['cider/cider-nrepl (get-cider-version)]]))
 
 (defn started?
   []
