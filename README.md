@@ -25,4 +25,6 @@ comment中添加ip地址显示
 
 感谢 https://github.com/GerbenJavado/LinkFinder 的正则表达式
 
-
+## easy search 
+  方便在repeater中搜索文本，有时要查看输入的内容是否在响应中存在，手动复制比较麻烦，使用此脚本，
+  在repeater的request或response中选中文本， 然后按鼠标右键，自动在response中搜索选中的文本
