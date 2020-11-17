@@ -25,11 +25,11 @@
    menu-context
    (fn [invocation]
      (let [txt (context-menu/get-selected-text invocation)]
-       (log/info "cyber-chef selected text:" txt)
-       [(gui/menu-item :text "CyberChef Magic"
-                       :enabled? (not-empty txt)
-                       :listen [:action (fn [e]
-                                          (browse-cyber-chef txt))])]))))
+       (when-not (empty? txt)
+         [(gui/menu-item :text "CyberChef Magic"
+                         :enabled? true
+                         :listen [:action (fn [e]
+                                            (browse-cyber-chef txt))])])))))
 
 (def reg (scripts/reg-script! :cyber-chef
                               {:name "cyber chef helper"

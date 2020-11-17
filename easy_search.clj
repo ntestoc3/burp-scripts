@@ -45,17 +45,19 @@
      (when (= :repeater  (-> (.getToolFlag invocation)
                              helper/tool-type-inv))
        (let [txt (context-menu/get-selected-text invocation)]
-         (-> (.getInputEvent invocation)
-             (gui/to-widget)
-             (find-first-parent javax.swing.JSplitPane)
-             (.getRightComponent)
-             (gui/select [:<javax.swing.JTextField>])
-             (as-> $
-                 (doseq [t $]
-                   ;; 设置搜索框的值
-                   (when (gui/config t :editable?)
-                     (gui/text! t txt)
-                     (key-enter t KeyEvent/VK_ENTER))))))))))
+         (when-not (empty? txt)
+           (-> (.getInputEvent invocation)
+               ;; 查找搜索框
+               (gui/to-widget)
+               (find-first-parent javax.swing.JSplitPane)
+               (.getRightComponent)
+               (gui/select [:<javax.swing.JTextField>])
+               (as-> $
+                   (doseq [t $]
+                     ;; 设置搜索框的值
+                     (when (gui/config t :editable?)
+                       (gui/text! t txt)
+                       (key-enter t KeyEvent/VK_ENTER)))))))))))
 
 
 (def reg (scripts/reg-script! :easy-search
