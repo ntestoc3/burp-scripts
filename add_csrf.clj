@@ -20,51 +20,46 @@
             [burp-clj.proxy :as proxy]
             [seesaw.core :as gui]))
 
-(helper/add-dep-with-proxy '[[clj-http "3.10.1"]])
-(require '[clj-http.client :as http])
-
 (defn extract-csrf-token
+  "按自己需求修改"
   [body]
   (some->> body
-           (re-find #"name=\"csrf-token\"\scontent=\"(.*)\"")
+           ;; (re-find #"name=\"csrf-token\"\scontent=\"(.*)\"")
+           (re-find #"name=\"csrf\"\svalue=\"(.*)\"")
            second))
 
-(defn send-request
-  "`use-proxy` 是否使用burp proxy代理,方便调试"
-  ([req use-proxy]
-   (send-request (if use-proxy
-                   (merge req {:insecure? true
-                               :proxy-host "127.0.0.1"
-                               :proxy-port 8080 })
-                   req)))
-  ([req]
-   (let [r (http/request req)]
-     (log/info :send-request "return:" (:status r))
-     r)))
-
-(defn get-url-host
-  [url]
-  (-> (java.net.URL. url)
-      (.getHost)))
+(defn parse-target [req-resp]
+  (let [req (-> (.getRequest req-resp)
+                (utils/parse-request {:key-fn identity
+                                      :val-fn identity}))
+        service (-> (.getHttpService req-resp)
+                    (helper/parse-http-service))]
+    (merge req service)))
 
 (defn set-csrf-token
   "设置`curr-req` csrf token"
-  [curr-req csrf-url]
-  (let [req-info (utils/parse-request curr-req)]
-    (when (= (:host req-info)
-             (get-url-host csrf-url))
-        (let [resp (send-request (assoc req-info
-                                        :url csrf-url
-                                        :throw-exceptions false)
-                                 true)
-              csrf-token (extract-csrf-token (:body resp))]
-          (if csrf-token
-            (do (log/info :set-csrf-token "url:" (:url req-info) "csrf token:" csrf-token)
-                (->> (assoc-in req-info [:headers :x-csrf-token] csrf-token)
-                     (utils/build-request)
-                     (.getBytes)
-                     (.setRequest curr-req)))
-            (do (log/warn :set-csrf-token "not found csrf token for:" (:url req-info))))))))
+  [curr-req csrf-target]
+  (let [target (parse-target curr-req)]
+    (when (and (= (:host target)
+                  (:host csrf-target))
+               (not= (:url target)
+                     (:url csrf-target)))
+      (log/info "start csrf-token request.")
+      (let [csrf-token (-> (assoc csrf-target :headers (:headers target))
+                           ;; 使用当前请求的headers进行替换
+                           (utils/build-request-raw {:key-fn identity
+                                                     :val-fn identity})
+                           (->> (helper/send-http-raw2 target))
+                           helper/bytes->str
+                           (extract-csrf-token))]
+        (if csrf-token
+          (do (log/info :set-csrf-token "url:" (:url target) "csrf token:" csrf-token)
+              (-> (update target :headers utils/assoc-header "X-CSRF-Token" csrf-token)
+                  (utils/build-request-raw {:key-fn identity
+                                            :val-fn identity})
+                  (.getBytes)
+                  (->> (.setRequest curr-req))))
+          (log/warn :set-csrf-token "not found csrf token for:" (:url target)))))))
 
 (def tool-scope #{:extender
                   :repeater
@@ -74,14 +69,14 @@
                   :intruder
                   })
 
-(def csrf-url (atom nil))
+(def csrf-target (atom nil))
 
 (defn add-csrf-proc
   [{:keys [tool is-request msg]}]
   (when (and is-request
              (tool-scope tool))
-    (when-let [url @csrf-url]
-      (set-csrf-token msg url))))
+    (when-let [target @csrf-target]
+      (set-csrf-token msg target))))
 
 (def menu-context #{:message-editor-request
                     :message-editor-response
@@ -98,14 +93,13 @@
        [(gui/menu-item :text "Set CSRF URL"
                        :listen [:action (fn [e]
                                           (when-let [data (-> (first msgs)
-                                                              (.getRequest)
-                                                              utils/parse-request)]
-                                            (reset! csrf-url (:url data))))])]))))
+                                                              parse-target)]
+                                            (reset! csrf-target data)))])]))))
 
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
-                               :version "0.1.2"
-                               :min-burp-clj-version "0.3.5"
+                               :version "0.2.0"
+                               :min-burp-clj-version "0.4.4"
                                :http-listener {:add-csrf/http-listener
                                                (make-http-proc add-csrf-proc)}
                                :context-menu {:add-csrf/context-menu (set-url-menu)}
