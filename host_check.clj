@@ -6,6 +6,7 @@
             [burp-clj.context-menu :as context-menu]
             [burp-clj.scripts :as scripts]
             [burp-clj.helper :as helper]
+            [com.climate.claypoole :as thread-pool]
             [seesaw.core :as gui]
             [taoensso.timbre :as log]))
 
@@ -16,8 +17,8 @@
                 {:key :response/status :text "Resp.Status" :class java.lang.Long}
                 {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
                 {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
-                {:key :port :text "PORT" :class java.lang.Long}
-                {:key :comment :text "Comment" :class java.lang.String}])
+                {:key :comment :text "Comment" :class java.lang.String}
+                {:key :port :text "PORT" :class java.lang.Long}])
 
 (def bad-host "badhost.hostcheck.com")
 
@@ -38,6 +39,11 @@
          (update :headers
                  utils/update-header
                  :host #(str %1 ".postbad")
+                 {:keep-old-key true}))
+     (-> (assoc info :comment "localhost")
+         (update :headers
+                 utils/assoc-header
+                 :host "localhost"
                  {:keep-old-key true}))
      (-> (assoc info :comment "absolute URL")
          (update :url #(str (helper/get-full-host service) %1))
@@ -66,15 +72,12 @@
 
 (defn make-req
   [ms index r]
-  (log/info "start send " index " r:" r "service:" (:service r))
   (-> (utils/build-request-raw r {:key-fn identity})
       (helper/send-http-raw (:service r))
       (helper/parse-http-req-resp)
       (assoc :comment (:comment r)
              :index index)
-      (log/spy)
-      (->> (swap! ms conj)))
-  (log/info "end send"))
+      (->> (swap! ms conj))))
 
 (defn get-req-exp-service
   [req-resp]
@@ -82,19 +85,23 @@
         service (.getHttpService req-resp)]
     (map #(assoc %1 :service service) (build-exps req service))))
 
+(def thread-pool-size 10 )
+
 (defn host-header-check
   [msgs]
   (let [ms (atom [])]
     (utils/show-ui (message-viewer/http-message-viewer
                     {:datas       ms
                      :columns     cols-info
-                     :ac-words    (keys (first @ms))
-                     :setting-key :host-check/intruder
-                     }))
-    (future (doseq [[index info] (->> msgs
-                                      (mapcat get-req-exp-service)
-                                      (map-indexed vector))]
-              (make-req ms index info)))))
+                     :ac-words    (-> (first msgs)
+                                      helper/parse-http-req-resp
+                                      keys)
+                     :setting-key :host-check/intruder}))
+    (future (thread-pool/upfor thread-pool-size
+                               [[index info] (->> msgs
+                                                  (mapcat get-req-exp-service)
+                                                  (map-indexed vector))]
+                               (make-req ms index info)))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
@@ -115,7 +122,7 @@
 (def reg (scripts/reg-script! :host-check
                               {:name "host header check"
                                :version "0.0.1"
-                               :min-burp-clj-version "0.4.4"
+                               :min-burp-clj-version "0.4.5"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
