@@ -1,4 +1,5 @@
 (ns add-csrf
+  "自动添加csrf　token,还不完善，需要针对不同的目标进行修"
   (:require [clojure.string :as str]
             [taoensso.timbre :as log]
             [seesaw.swingx :as guix]
@@ -49,8 +50,8 @@
                            ;; 使用当前请求的headers进行替换
                            (utils/build-request-raw {:key-fn identity
                                                      :val-fn identity})
-                           (->> (helper/send-http-raw2 target))
-                           helper/bytes->str
+                           (helper/send-http-raw2 target)
+                           utils/->string
                            (extract-csrf-token))]
         (if csrf-token
           (do (log/info :set-csrf-token "url:" (:url target) "csrf token:" csrf-token)

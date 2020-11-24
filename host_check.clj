@@ -1,4 +1,5 @@
 (ns host-check
+  "检测HTTP Host头漏洞"
   (:require [burp-clj.utils :as utils]
             [burp-clj.extender :as extender]
             [burp-clj.message-viewer :as message-viewer]
@@ -18,11 +19,82 @@
                 {:key :port :text "PORT" :class java.lang.Long}
                 {:key :comment :text "Comment" :class java.lang.String}])
 
-(defonce ms (atom nil))
+(def bad-host "badhost.hostcheck.com")
 
-(defn host-check
+(defn build-exps
+  [req service]
+  (let [info (utils/parse-request req {:key-fn identity})]
+    [(-> (assoc info :comment "bad port")
+         (update :headers
+                 utils/update-header
+                 :host #(str %1 ":badport")
+                 {:keep-old-key true}))
+     (-> (assoc info :comment "pre bad")
+         (update :headers
+                 utils/update-header
+                 :host #(str %1 "prebad")
+                 {:keep-old-key true}))
+     (-> (assoc info :comment "post bad")
+         (update :headers
+                 utils/update-header
+                 :host #(str %1 ".postbad")
+                 {:keep-old-key true}))
+     (-> (assoc info :comment "absolute URL")
+         (update :url #(str (helper/get-full-host service) %1))
+         (update :headers
+                 utils/assoc-header
+                 :host bad-host
+                 {:keep-old-key true}))
+     (-> (assoc info :comment "multi host")
+         (update :headers
+                 utils/insert-headers
+                 [["Host" bad-host]]))
+     (-> (assoc info :comment "host line wrapping")
+         (update :headers
+                 utils/insert-headers
+                 [[" Host" bad-host]]
+                 :host
+                 {:insert-before true}))
+     (-> (assoc info :comment "other host headers")
+         (update :headers
+                 utils/insert-headers
+                 [["X-Forwarded-Host" bad-host]
+                  ["X-Host" bad-host]
+                  ["X-Forwarded-Server" bad-host]
+                  ["X-HTTP-Host-Override" bad-host]
+                  ["Forwarded" bad-host]]))]))
+
+(defn make-req
+  [ms index r]
+  (log/info "start send " index " r:" r "service:" (:service r))
+  (-> (utils/build-request-raw r {:key-fn identity})
+      (helper/send-http-raw (:service r))
+      (helper/parse-http-req-resp)
+      (assoc :comment (:comment r)
+             :index index)
+      (log/spy)
+      (->> (swap! ms conj)))
+  (log/info "end send"))
+
+(defn get-req-exp-service
+  [req-resp]
+  (let [req (.getRequest req-resp)
+        service (.getHttpService req-resp)]
+    (map #(assoc %1 :service service) (build-exps req service))))
+
+(defn host-header-check
   [msgs]
-  (reset! ms msgs))
+  (let [ms (atom [])]
+    (utils/show-ui (message-viewer/http-message-viewer
+                    {:datas       ms
+                     :columns     cols-info
+                     :ac-words    (keys (first @ms))
+                     :setting-key :host-check/intruder
+                     }))
+    (future (doseq [[index info] (->> msgs
+                                      (mapcat get-req-exp-service)
+                                      (map-indexed vector))]
+              (make-req ms index info)))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
@@ -34,11 +106,11 @@
   (context-menu/make-context-menu
    menu-context
    (fn [invocation]
-     [(gui/menu-item :text "Send request to host-check"
+     [(gui/menu-item :text "Send request to Host-Header-check"
                      :enabled? true
                      :listen [:action (fn [e]
                                         (-> (context-menu/get-selected-messge invocation)
-                                            (host-check)))])])))
+                                            (host-header-check)))])])))
 
 (def reg (scripts/reg-script! :host-check
                               {:name "host header check"
@@ -55,13 +127,20 @@
 
   (def req2 (update req :headers
                     utils/insert-headers
-                    [["Host" "www.bing.com"]]
+                    [["Host" "www.bing.com"]
+                     ["Content-length" "1228"]]
                     :host
                     {:insert-before true}))
 
-  (def d2 (utils/build-request-raw req2 {:key-fn identity}))
+  (def d2 (utils/build-request-raw (assoc req2
+                                          :body "test body")
+                                   {:key-fn identity
+                                    :fix-content-length false}))
 
-  (def dr1 (helper/send-http-raw (.getHttpService d1) d2))
+  (def dr1 (helper/send-http-raw2 d2
+                                  {:host "127.0.0.1"
+                                   :port 8888
+                                   :protocol "http"}))
 
   (def hs (extender/get-proxy-history))
 
