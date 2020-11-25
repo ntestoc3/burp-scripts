@@ -45,12 +45,14 @@
                utils/assoc-header
                :host "localhost"
                {:keep-old-key true}))
-   (-> (assoc info :comment "absolute URL")
+   (-> (assoc info :comment "absolute URL(bad host)")
        (update :url #(str (helper/get-full-host service) %1))
        (update :headers
                utils/assoc-header
                :host bad-host
                {:keep-old-key true}))
+   (-> (assoc info :comment "absolute URL(bad get)")
+       (update :url #(str "http://" bad-host %1)))
    (-> (assoc info :comment "multi host")
        (update :headers
                utils/insert-headers
@@ -70,8 +72,6 @@
                 ["X-HTTP-Host-Override" bad-host]
                 ["Forwarded" bad-host]]))])
 
-(dh/defratelimiter req-limit {:rate 5})
-
 (defn build-request-failed-msg
   ([index req service] (build-request-failed-msg req service nil))
   ([index req service comment]
@@ -83,7 +83,11 @@
      :index index
      :rtt -1
      :comment (str "FAILED! " comment)
-     :background :red})))
+     :foreground :red})))
+
+;; 用rate-limiter 按秒限速不实际，一个请求可能很长时间
+;; bulkhead也没必要，直接限制线程池数量就可以了
+(def thread-pool-size 5)
 
 (defn make-req
   [ms index r]
@@ -91,23 +95,25 @@
                   :abort-on NullPointerException ;; http连接错误会造成NullPointerException
                   :delay-ms 2000                 ;; 重试前等待时间
                   :on-retry (fn [val ex]
-                              (log/error "request " r "failed, retrying..." ex))
+                              (log/error "request " index "failed, retrying..." ex))
                   :on-failure (fn [_ ex]
-                                (log/warn "request " r "failed!" ex)
+                                (log/warn "request " index "failed!" ex)
                                 (->> (build-request-failed-msg index
                                                                (:request/raw r)
                                                                (:service r)
                                                                (:comment r))
                                      (swap! ms conj)))
                   :max-retries 3}
-    (dh/with-rate-limiter {:ratelimiter req-limit}
-      (let [{:keys [return time]} (utils/time-execution
-                                   (helper/send-http-raw (:request/raw r) (:service r)))]
-        (-> (helper/parse-http-req-resp return)
-            (assoc :comment (:comment r)
-                   :rtt time
-                   :index index)
-            (->> (swap! ms conj)))))))
+    (log/info "start request" index)
+    (let [{:keys [return time]} (utils/time-execution
+                                 (dh/with-timeout {:timeout-ms 5000
+                                                   :interrupt? true}
+                                   (helper/send-http-raw (:request/raw r) (:service r))))]
+      (-> (helper/parse-http-req-resp return)
+          (assoc :comment (:comment r)
+                 :rtt time
+                 :index index)
+          (->> (swap! ms conj))))))
 
 (defn get-req-exp-service
   [req-resp]
@@ -119,8 +125,6 @@
                 {:service service
                  :comment (:comment data)
                  :request/raw (utils/build-request-raw data {:key-fn identity})})))))
-
-(def thread-pool-size 10 )
 
 (defn host-header-check
   [msgs]
