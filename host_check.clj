@@ -72,6 +72,19 @@
 
 (dh/defratelimiter req-limit {:rate 5})
 
+(defn build-request-failed-msg
+  ([index req service] (build-request-failed-msg req service nil))
+  ([index req service comment]
+   (merge
+    (helper/parse-http-service service)
+    (helper/flatten-format-req-resp req :request)
+    {:full-host (helper/get-full-host service)
+     :request/raw req
+     :index index
+     :rtt -1
+     :comment (str "FAILED! " comment)
+     :background :red})))
+
 (defn make-req
   [ms index r]
   (dh/with-retry {:retry-on Exception
@@ -81,15 +94,10 @@
                               (log/error "request " r "failed, retrying..." ex))
                   :on-failure (fn [_ ex]
                                 (log/warn "request " r "failed!" ex)
-                                (->> (merge
-                                      (helper/parse-http-service (:service r))
-                                      (helper/flatten-format-req-resp (:request/raw r) :request)
-                                      {:full-host (helper/get-full-host (:service r))
-                                       :request/raw (:request/raw r)
-                                       :index index
-                                       :rtt -1
-                                       :comment (str "FAILED! " (:comment r))
-                                       :background :red})
+                                (->> (build-request-failed-msg index
+                                                               (:request/raw r)
+                                                               (:service r)
+                                                               (:comment r))
                                      (swap! ms conj)))
                   :max-retries 3}
     (dh/with-rate-limiter {:ratelimiter req-limit}
