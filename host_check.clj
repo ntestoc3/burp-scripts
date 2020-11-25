@@ -151,7 +151,7 @@
 (def reg (scripts/reg-script! :host-check
                               {:name "host header check"
                                :version "0.0.1"
-                               :min-burp-clj-version "0.4.5"
+                               :min-burp-clj-version "0.4.6"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
