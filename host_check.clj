@@ -7,9 +7,9 @@
             [burp-clj.scripts :as scripts]
             [burp-clj.helper :as helper]
             [com.climate.claypoole :as thread-pool]
+            [diehard.core :as dh]
             [seesaw.core :as gui]
             [taoensso.timbre :as log]))
-
 
 (def cols-info [{:key :index :text "#" :class java.lang.Long}
                 {:key :full-host :text "Host" :class java.lang.String}
@@ -18,72 +18,99 @@
                 {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
                 {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
                 {:key :comment :text "Comment" :class java.lang.String}
-                {:key :port :text "PORT" :class java.lang.Long}])
+                {:key :port :text "PORT" :class java.lang.Long}
+                {:key :rtt :text "RTT(ms)" :class java.lang.Double}])
 
 (def bad-host "badhost.hostcheck.com")
 
 (defn build-exps
-  [req service]
-  (let [info (utils/parse-request req {:key-fn identity})]
-    [(-> (assoc info :comment "bad port")
-         (update :headers
-                 utils/update-header
-                 :host #(str %1 ":badport")
-                 {:keep-old-key true}))
-     (-> (assoc info :comment "pre bad")
-         (update :headers
-                 utils/update-header
-                 :host #(str %1 "prebad")
-                 {:keep-old-key true}))
-     (-> (assoc info :comment "post bad")
-         (update :headers
-                 utils/update-header
-                 :host #(str %1 ".postbad")
-                 {:keep-old-key true}))
-     (-> (assoc info :comment "localhost")
-         (update :headers
-                 utils/assoc-header
-                 :host "localhost"
-                 {:keep-old-key true}))
-     (-> (assoc info :comment "absolute URL")
-         (update :url #(str (helper/get-full-host service) %1))
-         (update :headers
-                 utils/assoc-header
-                 :host bad-host
-                 {:keep-old-key true}))
-     (-> (assoc info :comment "multi host")
-         (update :headers
-                 utils/insert-headers
-                 [["Host" bad-host]]))
-     (-> (assoc info :comment "host line wrapping")
-         (update :headers
-                 utils/insert-headers
-                 [[" Host" bad-host]]
-                 :host
-                 {:insert-before true}))
-     (-> (assoc info :comment "other host headers")
-         (update :headers
-                 utils/insert-headers
-                 [["X-Forwarded-Host" bad-host]
-                  ["X-Host" bad-host]
-                  ["X-Forwarded-Server" bad-host]
-                  ["X-HTTP-Host-Override" bad-host]
-                  ["Forwarded" bad-host]]))]))
+  [info service]
+  [(-> (assoc info :comment "bad port")
+       (update :headers
+               utils/update-header
+               :host #(str %1 ":badport")
+               {:keep-old-key true}))
+   (-> (assoc info :comment "pre bad")
+       (update :headers
+               utils/update-header
+               :host #(str %1 "prebad")
+               {:keep-old-key true}))
+   (-> (assoc info :comment "post bad")
+       (update :headers
+               utils/update-header
+               :host #(str %1 ".postbad")
+               {:keep-old-key true}))
+   (-> (assoc info :comment "localhost")
+       (update :headers
+               utils/assoc-header
+               :host "localhost"
+               {:keep-old-key true}))
+   (-> (assoc info :comment "absolute URL")
+       (update :url #(str (helper/get-full-host service) %1))
+       (update :headers
+               utils/assoc-header
+               :host bad-host
+               {:keep-old-key true}))
+   (-> (assoc info :comment "multi host")
+       (update :headers
+               utils/insert-headers
+               [["Host" bad-host]]))
+   (-> (assoc info :comment "host line wrapping")
+       (update :headers
+               utils/insert-headers
+               [[" Host" bad-host]]
+               :host
+               {:insert-before true}))
+   (-> (assoc info :comment "other host headers")
+       (update :headers
+               utils/insert-headers
+               [["X-Forwarded-Host" bad-host]
+                ["X-Host" bad-host]
+                ["X-Forwarded-Server" bad-host]
+                ["X-HTTP-Host-Override" bad-host]
+                ["Forwarded" bad-host]]))])
+
+(dh/defratelimiter req-limit {:rate 5})
 
 (defn make-req
   [ms index r]
-  (-> (utils/build-request-raw r {:key-fn identity})
-      (helper/send-http-raw (:service r))
-      (helper/parse-http-req-resp)
-      (assoc :comment (:comment r)
-             :index index)
-      (->> (swap! ms conj))))
+  (dh/with-retry {:retry-on Exception
+                  :abort-on NullPointerException ;; http连接错误会造成NullPointerException
+                  :delay-ms 2000                 ;; 重试前等待时间
+                  :on-retry (fn [val ex]
+                              (log/error "request " r "failed, retrying..." ex))
+                  :on-failure (fn [_ ex]
+                                (log/warn "request " r "failed!" ex)
+                                (->> (merge
+                                      (helper/parse-http-service (:service r))
+                                      (helper/flatten-format-req-resp (:request/raw r) :request)
+                                      {:full-host (helper/get-full-host (:service r))
+                                       :request/raw (:request/raw r)
+                                       :index index
+                                       :rtt -1
+                                       :comment (str "FAILED! " (:comment r))
+                                       :background :red})
+                                     (swap! ms conj)))
+                  :max-retries 3}
+    (dh/with-rate-limiter {:ratelimiter req-limit}
+      (let [{:keys [return time]} (utils/time-execution
+                                   (helper/send-http-raw (:request/raw r) (:service r)))]
+        (-> (helper/parse-http-req-resp return)
+            (assoc :comment (:comment r)
+                   :rtt time
+                   :index index)
+            (->> (swap! ms conj)))))))
 
 (defn get-req-exp-service
   [req-resp]
-  (let [req (.getRequest req-resp)
+  (let [req (-> (.getRequest req-resp)
+                (utils/parse-request {:key-fn identity}))
         service (.getHttpService req-resp)]
-    (map #(assoc %1 :service service) (build-exps req service))))
+    (->> (build-exps req service)
+         (map (fn [data]
+                {:service service
+                 :comment (:comment data)
+                 :request/raw (utils/build-request-raw data {:key-fn identity})})))))
 
 (def thread-pool-size 10 )
 
@@ -96,7 +123,9 @@
                      :ac-words    (-> (first msgs)
                                       helper/parse-http-req-resp
                                       keys)
-                     :setting-key :host-check/intruder}))
+                     :ken-fn :index
+                     :setting-key :host-check/intruder})
+                   {:title "host header check"})
     (future (thread-pool/upfor thread-pool-size
                                [[index info] (->> msgs
                                                   (mapcat get-req-exp-service)
@@ -127,7 +156,7 @@
 
 
 (comment
-  (def d1 (first @ms))
+  (def d1 (first (extender/get-proxy-history)))
 
   (def req (-> (.getRequest d1)
                (utils/parse-request {:key-fn identity})))
