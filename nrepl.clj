@@ -100,7 +100,10 @@
                           (when (check-set-nrepl-port)
                             (if (:nrepl-server @state/state)
                               (stop-nrepl)
-                              (start-nrepl)))))
+                              (do (gui/config! e :enabled? false)
+                                  (future (start-nrepl)
+                                          (gui/invoke-later
+                                           (gui/config! e :enabled? true))))))))
 
     (mig-panel
      :border (border/empty-border :left 10 :top 10)
@@ -147,7 +150,9 @@
                                :min-burp-clj-version "0.1.1"
 
                                ;; 启用脚本时执行
-                               :enable-callback (fn [_] (start-nrepl))
+                               :enable-callback (fn [_]
+                                                  (when (extender/get-setting :nrepl/start-on-load)
+                                                    (start-nrepl)))
 
                                ;; 禁用脚本时执行
                                :disable-callback (fn [_] (stop-nrepl))
