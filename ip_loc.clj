@@ -8,8 +8,10 @@
             [clojure.java.io :as io])
   (:import java.net.InetAddress))
 
-(helper/add-dep-with-proxy '[[com.github.jarod/qqwry-java "0.8.0"]])
+(helper/add-dep-with-proxy '[[com.github.jarod/qqwry-java "0.8.0"]
+                             [org.clojure/core.memoize "1.0.236"]])
 (import 'com.github.jarod.qqwry.QQWry)
+(require '[clojure.core.memoize :as memo])
 
 (defn file->bytes [file]
   (with-open [xin (io/input-stream file)
@@ -32,13 +34,18 @@
          " -- "
          (.getSubInfo loc))))
 
+(def mem-get-ip-loc
+  (memo/lru get-ip-loc
+            {}
+            :lru/threshold 20))
+
 (defn ip-loc
   [is-req msg]
   (when is-req
     (let [req-resp (.getMessageInfo msg)
           ip (-> (.getHttpService req-resp)
                  (.getHost))]
-      (try (let [ip-loc-str (str (get-ip-loc ip) " "
+      (try (let [ip-loc-str (str (mem-get-ip-loc ip) " "
                                  (.getComment req-resp))]
              (.setComment req-resp ip-loc-str))
            (catch Exception e
