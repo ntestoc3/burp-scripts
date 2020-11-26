@@ -27,12 +27,15 @@
 
 (defn get-ip-loc
   [host]
-  (let [loc (->> (InetAddress/getByName host)
-                 (.getHostAddress)
-                 (.findIP qqwry))]
-    (str (.getMainInfo loc)
-         " -- "
-         (.getSubInfo loc))))
+  (try
+    (let [loc (->> (InetAddress/getByName host)
+                   (.getHostAddress)
+                   (.findIP qqwry))]
+      (str (.getMainInfo loc)
+           " -- "
+           (.getSubInfo loc)))
+    (catch Exception e
+      (log/error "get-ip-loc for " host " error:" e))))
 
 (def mem-get-ip-loc
   (memo/lru get-ip-loc
@@ -45,11 +48,9 @@
     (let [req-resp (.getMessageInfo msg)
           ip (-> (.getHttpService req-resp)
                  (.getHost))]
-      (try (let [ip-loc-str (str (mem-get-ip-loc ip) " "
-                                 (.getComment req-resp))]
-             (.setComment req-resp ip-loc-str))
-           (catch Exception e
-             (log/error "ip loc for:" (.getUrl req-resp) "ip:" ip))))))
+      (when-some [ip-loc-str (mem-get-ip-loc ip)]
+        (->> (str ip-loc-str " " (.getComment req-resp))
+             (.setComment req-resp))))))
 
 (defn ip-loc-proxy []
   (proxy/make-proxy-proc ip-loc))
