@@ -6,6 +6,7 @@
             [burp-clj.context-menu :as context-menu]
             [burp-clj.scripts :as scripts]
             [burp-clj.helper :as helper]
+            [burp-clj.collaborator :as bc]
             [com.climate.claypoole :as thread-pool]
             [diehard.core :as dh]
             [seesaw.core :as gui]

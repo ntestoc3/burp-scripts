@@ -4,12 +4,33 @@
             [burp-clj.utils :as utils]
             [burp-clj.scripts :as scripts]
             [burp-clj.proxy :as proxy]
-            [burp-clj.helper :as helper]))
+            [burp-clj.helper :as helper]
+            [clojure.java.io :as io])
+  (:import java.net.InetAddress))
 
+(helper/add-dep-with-proxy '[[com.github.jarod/qqwry-java "0.8.0"]])
+(import 'com.github.jarod.qqwry.QQWry)
 
-(helper/add-dep-with-proxy '[[ntestoc3/netlib "0.3.5-SNAPSHOT"]])
-(require '[netlib.qqwry :as qqwry])
+(defn file->bytes [file]
+  (with-open [xin (io/input-stream file)
+              xout (java.io.ByteArrayOutputStream.)]
+    (io/copy xin xout)
+    (.toByteArray xout)))
 
+(defonce qqwry (-> (io/resource "qqwry.dat")
+                   file->bytes
+                   (QQWry.)))
+
+(log/info "ip-loc qqwry version:" (.getDatabaseVersion qqwry))
+
+(defn get-ip-loc
+  [host]
+  (let [loc (->> (InetAddress/getByName host)
+                 (.getHostAddress)
+                 (.findIP qqwry))]
+    (str (.getMainInfo loc)
+         " -- "
+         (.getSubInfo loc))))
 
 (defn ip-loc
   [is-req msg]
@@ -17,8 +38,7 @@
     (let [req-resp (.getMessageInfo msg)
           ip (-> (.getHttpService req-resp)
                  (.getHost))]
-      (try (let [ip-geo (qqwry/get-location ip)
-                 ip-loc-str (str (:county ip-geo) " -- " (:area ip-geo) " "
+      (try (let [ip-loc-str (str (get-ip-loc ip) " "
                                  (.getComment req-resp))]
              (.setComment req-resp ip-loc-str))
            (catch Exception e
