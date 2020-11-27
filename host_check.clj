@@ -6,11 +6,12 @@
             [burp-clj.context-menu :as context-menu]
             [burp-clj.scripts :as scripts]
             [burp-clj.helper :as helper]
-            [burp-clj.collaborator :as bc]
+            [burp-clj.collaborator :as collaborator]
             [com.climate.claypoole :as thread-pool]
             [diehard.core :as dh]
             [seesaw.core :as gui]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:use com.rpl.specter))
 
 (def cols-info [{:key :index :text "#" :class java.lang.Long}
                 {:key :full-host :text "Host" :class java.lang.String}
@@ -19,79 +20,137 @@
                 {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
                 {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
                 {:key :comment :text "Comment" :class java.lang.String}
+                {:key :payload-id :text "Payload id" :class java.lang.String}
+                {:key :result :text "Result" :class java.lang.String}
                 {:key :port :text "PORT" :class java.lang.Long}
                 {:key :rtt :text "RTT(ms)" :class java.lang.Double}])
 
-(def bad-host "badhost.hostcheck.com")
+(defn gen-exp-info
+  "生成exp信息
+  `info` 解码的request请求
+  :comment exp注释
+  :bc collaborator client
+  :updates 为对exp的更新函数,格式为[[update-key update-fn] ...], update-fn接受2个参数，第一个为当前的exp信息，第二个为update-key对应的value。
+  "
+  [info {:keys [comment bc updates]}]
+  (let [bc-server (collaborator/get-serever-loc bc)]
+    (let [payload-id (collaborator/gen-payload bc)
+          new-info (assoc info
+                          :comment comment
+                          :payload-id payload-id
+                          :payload-host (str payload-id "." bc-server))]
+      (reduce
+       (fn [info [update-key update-fn]]
+         (update info update-key (fn [old-v]
+                                   (update-fn info old-v))))
+       new-info
+       updates))))
 
 (defn build-exps
-  [info service]
-  [(-> (assoc info :comment "bad port")
-       (update :headers
-               utils/update-header
-               :host #(str %1 ":badport")
-               {:keep-old-key true}))
-   (-> (assoc info :comment "pre bad")
-       (update :headers
-               utils/update-header
-               :host #(str %1 "prebad")
-               {:keep-old-key true}))
-   (-> (assoc info :comment "post bad")
-       (update :headers
-               utils/update-header
-               :host #(str %1 ".postbad")
-               {:keep-old-key true}))
-   (-> (assoc info :comment "localhost")
-       (update :headers
-               utils/assoc-header
-               :host "localhost"
-               {:keep-old-key true}))
-   (-> (assoc info :comment "absolute URL(bad host)")
-       (update :url #(str (helper/get-full-host service) %1))
-       (update :headers
-               utils/assoc-header
-               :host bad-host
-               {:keep-old-key true}))
-   (-> (assoc info :comment "absolute URL(bad get)")
-       (update :url #(str "http://" bad-host %1)))
-   (-> (assoc info :comment "multi host")
-       (update :headers
-               utils/insert-headers
-               [["Host" bad-host]]))
-   (-> (assoc info :comment "host line wrapping")
-       (update :headers
-               utils/insert-headers
-               [[" Host" bad-host]]
-               :host
-               {:insert-before true}))
-   (-> (assoc info :comment "other host headers")
-       (update :headers
-               utils/insert-headers
-               [["X-Forwarded-Host" bad-host]
-                ["X-Host" bad-host]
-                ["X-Forwarded-Server" bad-host]
-                ["X-HTTP-Host-Override" bad-host]
-                ["Forwarded" bad-host]]))])
+  [info service bc]
+  [(gen-exp-info info
+                 {:comment "bad port"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/update-header
+                                         hdrs
+                                         :host #(str %1 ":" (:payload-host exp))
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "pre bad"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/update-header
+                                         hdrs
+                                         :host #(str (:payload-host exp) "." %1)
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "post bad"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/update-header
+                                         hdrs
+                                         :host #(str %1 "." (:payload-host exp))
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "localhost"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/assoc-header
+                                         hdrs
+                                         :host "localhost"
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "bad host"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/assoc-header
+                                         hdrs
+                                         :host (:payload-host exp)
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "absolute URL(bad host)"
+                  :bc bc
+                  :updates [[:url (fn [exp u]
+                                    (str (helper/get-full-host service) u))]
+                            [:headers (fn [exp hdrs]
+                                        (utils/assoc-header
+                                         hdrs
+                                         :host (:payload-host exp)
+                                         {:keep-old-key true}))]]})
+   (gen-exp-info info
+                 {:comment "absolute URL(bad get)"
+                  :bc bc
+                  :updates [[:url (fn [exp u]
+                                    (str "http://" (:payload-host exp) u))]]})
+   (gen-exp-info info
+                 {:comment "multi host"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/insert-headers
+                                         hdrs
+                                         [["Host" (:payload-host exp)]]))]]})
+   (gen-exp-info info
+                 {:comment "host line wrapping"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/insert-headers
+                                         hdrs
+                                         [[" Host" (:payload-host exp)]]
+                                         :host
+                                         {:insert-before true}))]]})
+   (gen-exp-info info
+                 {:comment "other host headers"
+                  :bc bc
+                  :updates [[:headers (fn [exp hdrs]
+                                        (utils/insert-headers
+                                         hdrs
+                                         (let [bad-host (:payload-host exp)]
+                                           [["X-Forwarded-Host" bad-host]
+                                            ["X-Host" bad-host]
+                                            ["X-Forwarded-Server" bad-host]
+                                            ["X-HTTP-Host-Override" bad-host]
+                                            ["Forwarded" bad-host]])
+                                         :host
+                                         {:insert-before true}))]]})])
 
 (defn build-request-failed-msg
-  ([index req service] (build-request-failed-msg req service nil))
-  ([index req service comment]
-   (merge
-    (helper/parse-http-service service)
-    (helper/flatten-format-req-resp req :request)
-    {:full-host (helper/get-full-host service)
-     :request/raw req
-     :index index
-     :rtt -1
-     :comment (str "FAILED! " comment)
-     :foreground :red})))
+  [{:keys [service comment] :as req-info}]
+  (merge
+   (helper/parse-http-service service)
+   (helper/flatten-format-req-resp (:request/raw req-info) :request)
+   (dissoc req-info :service)
+   {:full-host (helper/get-full-host service)
+    :rtt -1
+    :comment (str "FAILED! " comment)
+    :foreground :red}))
 
 ;; 用rate-limiter 按秒限速不实际，一个请求可能很长时间
 ;; bulkhead也没必要，直接限制线程池数量就可以了
 (def thread-pool-size 5)
 
 (defn make-req
-  [ms index r]
+  [ms {:keys [index] :as r}]
   (dh/with-retry {:retry-on Exception
                   :abort-on NullPointerException ;; http连接错误会造成NullPointerException
                   :delay-ms 2000                 ;; 重试前等待时间
@@ -99,10 +158,7 @@
                               (log/error "request " index "failed, retrying..." ex))
                   :on-failure (fn [_ ex]
                                 (log/warn "request " index "failed!" ex)
-                                (->> (build-request-failed-msg index
-                                                               (:request/raw r)
-                                                               (:service r)
-                                                               (:comment r))
+                                (->> (build-request-failed-msg r)
                                      (swap! ms conj)))
                   :max-retries 3}
     (log/info "start request" index)
@@ -110,27 +166,39 @@
                                  (dh/with-timeout {:timeout-ms 5000
                                                    :interrupt? true}
                                    (helper/send-http-raw (:request/raw r) (:service r))))]
-      (-> (helper/parse-http-req-resp return)
-          (assoc :comment (:comment r)
-                 :rtt time
-                 :index index)
-          (->> (swap! ms conj))))))
+      (->> (merge
+            (helper/parse-http-req-resp return)
+            (dissoc r :request/raw :service)
+            {:rtt time})
+           (swap! ms conj)))))
 
 (defn get-req-exp-service
-  [req-resp]
+  [req-resp bc]
   (let [req (-> (.getRequest req-resp)
                 (utils/parse-request {:key-fn identity}))
         service (.getHttpService req-resp)]
-    (->> (build-exps req service)
+    (->> (build-exps req service bc)
          (map (fn [data]
                 {:service service
                  :comment (:comment data)
+                 :payload-id (:payload-id data)
                  :request/raw (utils/build-request-raw data {:key-fn identity})})))))
+
+(defn update-row-by-payload-id
+  [ms payload-id]
+  (let [add-by-id (fn [datas]
+                    (transform [ALL #(= payload-id (:payload-id %1))]
+                               #(assoc %1
+                                       :result "FOUND SSRF!"
+                                       :background :red)
+                               datas))]
+    (swap! ms add-by-id)))
 
 (defn host-header-check
   [msgs]
-  (let [ms (atom [])]
-    (utils/show-ui (message-viewer/http-message-viewer
+  (let [ms (atom [])
+        bc (collaborator/create)
+        msg-viewer (message-viewer/http-message-viewer
                     {:datas       ms
                      :columns     cols-info
                      :ac-words    (-> (first msgs)
@@ -138,12 +206,21 @@
                                       keys)
                      :ken-fn :index
                      :setting-key :host-check/intruder})
-                   {:title "host header check"})
+        collaborator-viewer (collaborator/make-ui
+                             {:collaborator bc
+                              :callback #(->> (:interaction-id %1)
+                                              (update-row-by-payload-id ms))})
+        main-view (gui/tabbed-panel :tabs [{:title "Payload Messages"
+                                            :content msg-viewer}
+                                           {:title "Collaborator client"
+                                            :content collaborator-viewer}])]
+    (utils/show-ui main-view {:title "host header check"})
     (future (thread-pool/upfor thread-pool-size
                                [[index info] (->> msgs
-                                                  (mapcat get-req-exp-service)
+                                                  (mapcat #(get-req-exp-service %1 bc))
                                                   (map-indexed vector))]
-                               (make-req ms index info)))))
+                               (->> (assoc info :index index)
+                                    (make-req ms))))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
@@ -163,8 +240,8 @@
 
 (def reg (scripts/reg-script! :host-check
                               {:name "host header check"
-                               :version "0.0.1"
-                               :min-burp-clj-version "0.4.6"
+                               :version "0.2.1"
+                               :min-burp-clj-version "0.4.8"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
