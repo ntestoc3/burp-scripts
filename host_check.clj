@@ -7,10 +7,12 @@
             [burp-clj.scripts :as scripts]
             [burp-clj.helper :as helper]
             [burp-clj.collaborator :as collaborator]
+            [burp-clj.table-util :as table-util]
             [com.climate.claypoole :as thread-pool]
             [diehard.core :as dh]
             [seesaw.core :as gui]
-            [taoensso.timbre :as log])
+            [taoensso.timbre :as log]
+            [seesaw.table :as table])
   (:use com.rpl.specter))
 
 (def cols-info [{:key :index :text "#" :class java.lang.Long}
@@ -143,14 +145,14 @@
    {:full-host (helper/get-full-host service)
     :rtt -1
     :comment (str "FAILED! " comment)
-    :foreground :red}))
+    :foreground :gray}))
 
 ;; 用rate-limiter 按秒限速不实际，一个请求可能很长时间
 ;; bulkhead也没必要，直接限制线程池数量就可以了
 (def thread-pool-size 5)
 
 (defn make-req
-  [ms {:keys [index] :as r}]
+  [{:keys [index] :as r}]
   (dh/with-retry {:retry-on Exception
                   :abort-on NullPointerException ;; http连接错误会造成NullPointerException
                   :delay-ms 2000                 ;; 重试前等待时间
@@ -158,19 +160,17 @@
                               (log/error "request " index "failed, retrying..." ex))
                   :on-failure (fn [_ ex]
                                 (log/warn "request " index "failed!" ex)
-                                (->> (build-request-failed-msg r)
-                                     (swap! ms conj)))
+                                (build-request-failed-msg r))
                   :max-retries 3}
     (log/info "start request" index)
     (let [{:keys [return time]} (utils/time-execution
                                  (dh/with-timeout {:timeout-ms 5000
                                                    :interrupt? true}
                                    (helper/send-http-raw (:request/raw r) (:service r))))]
-      (->> (merge
-            (helper/parse-http-req-resp return)
-            (dissoc r :request/raw :service)
-            {:rtt time})
-           (swap! ms conj)))))
+      (merge
+       (helper/parse-http-req-resp return)
+       (dissoc r :request/raw :service)
+       {:rtt time}))))
 
 (defn get-req-exp-service
   [req-resp bc]
@@ -184,32 +184,30 @@
                  :payload-id (:payload-id data)
                  :request/raw (utils/build-request-raw data {:key-fn identity})})))))
 
-(defn update-row-by-payload-id
-  [ms payload-id]
-  (let [add-by-id (fn [datas]
-                    (transform [ALL #(= payload-id (:payload-id %1))]
-                               #(assoc %1
-                                       :result "FOUND SSRF!"
-                                       :background :red)
-                               datas))]
-    (swap! ms add-by-id)))
+(defn update-table-found-payload
+  [tbl payload-id]
+  (gui/invoke-later
+   (table-util/update-by! tbl
+                          #(= payload-id (:payload-id %1))
+                          #(assoc %1
+                                  :result "FOUND SSRF!"
+                                  :background :red))))
 
 (defn host-header-check
   [msgs]
-  (let [ms (atom [])
-        bc (collaborator/create)
+  (let [bc (collaborator/create)
         msg-viewer (message-viewer/http-message-viewer
-                    {:datas       ms
-                     :columns     cols-info
+                    {:columns     cols-info
                      :ac-words    (-> (first msgs)
                                       helper/parse-http-req-resp
                                       keys)
                      :ken-fn :index
                      :setting-key :host-check/intruder})
+        msg-table (gui/select msg-viewer [:#http-message-table])
         collaborator-viewer (collaborator/make-ui
                              {:collaborator bc
                               :callback #(->> (:interaction-id %1)
-                                              (update-row-by-payload-id ms))})
+                                              (update-table-found-payload msg-table))})
         main-view (gui/tabbed-panel :tabs [{:title "Payload Messages"
                                             :content msg-viewer}
                                            {:title "Collaborator client"
@@ -220,7 +218,8 @@
                                                   (mapcat #(get-req-exp-service %1 bc))
                                                   (map-indexed vector))]
                                (->> (assoc info :index index)
-                                    (make-req ms))))))
+                                    (make-req)
+                                    (table/add! msg-table))))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
@@ -276,10 +275,8 @@
                             (let [info (helper/parse-http-req-resp v)]
                               (assoc info :index idx))) hs))
 
-  (def ds (atom datas))
-
   (utils/show-ui (message-viewer/http-message-viewer
-                  {:datas       ds
+                  {:datas       datas
                    :columns     cols-info
                    :ac-words    (keys (first @ds))
                    :setting-key :host-check/intruder
