@@ -15,30 +15,31 @@
             [seesaw.table :as table])
   (:use com.rpl.specter))
 
-(def cols-info [{:key :index :text "#" :class java.lang.Long}
-                {:key :full-host :text "Host" :class java.lang.String}
-                {:key :request/url :text "URL" :class java.lang.String}
-                {:key :response/status :text "Resp.Status" :class java.lang.Long}
-                {:key :response.headers/content-length :text "Resp.Len" :class java.lang.String}
-                {:key :response.headers/content-type :text "Resp.type" :class java.lang.String}
-                {:key :comment :text "Comment" :class java.lang.String}
-                {:key :payload-id :text "Payload id" :class java.lang.String}
-                {:key :result :text "Result" :class java.lang.String}
-                {:key :port :text "PORT" :class java.lang.Long}
-                {:key :rtt :text "RTT(ms)" :class java.lang.Double}])
+(def cols-info [{:key :index :text "#" :class Long}
+                {:key :full-host :text "Host" :class String}
+                {:key :request/url :text "URL" :class String}
+                {:key :response/status :text "Resp.Status" :class Long}
+                {:key :response.headers/content-length :text "Resp.Len" :class String}
+                {:key :response.headers/content-type :text "Resp.type" :class String}
+                {:key :exp-name :text "exploit name" :class String}
+                {:key :payload-id :text "Payload id" :class String}
+                {:key :result :text "Result" :class String}
+                {:key :comment :text "Comment" :class String}
+                {:key :port :text "PORT" :class Long}
+                {:key :rtt :text "RTT(ms)" :class Double}])
 
 (defn gen-exp-info
   "生成exp信息
   `info` 解码的request请求
-  :comment exp注释
+  :exp-name 注释
   :bc collaborator client
   :updates 为对exp的更新函数,格式为[[update-key update-fn] ...], update-fn接受2个参数，第一个为当前的exp信息，第二个为update-key对应的value。
   "
-  [info {:keys [comment bc updates]}]
+  [info {:keys [exp-name bc updates]}]
   (let [bc-server (collaborator/get-serever-loc bc)]
     (let [payload-id (collaborator/gen-payload bc)
           new-info (assoc info
-                          :comment comment
+                          :exp-name exp-name
                           :payload-id payload-id
                           :payload-host (str payload-id "." bc-server))]
       (reduce
@@ -51,7 +52,7 @@
 (defn build-exps
   [info service bc]
   [(gen-exp-info info
-                 {:comment "bad port"
+                 {:exp-name "bad port"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/update-header
@@ -59,7 +60,7 @@
                                          :host #(str %1 ":" (:payload-host exp))
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "pre bad"
+                 {:exp-name "pre bad"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/update-header
@@ -67,7 +68,7 @@
                                          :host #(str (:payload-host exp) "." %1)
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "post bad"
+                 {:exp-name "post bad"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/update-header
@@ -75,7 +76,7 @@
                                          :host #(str %1 "." (:payload-host exp))
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "localhost"
+                 {:exp-name "localhost"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/assoc-header
@@ -83,7 +84,7 @@
                                          :host "localhost"
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "bad host"
+                 {:exp-name "bad host"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/assoc-header
@@ -91,7 +92,7 @@
                                          :host (:payload-host exp)
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "absolute URL(bad host)"
+                 {:exp-name "absolute URL(bad host)"
                   :bc bc
                   :updates [[:url (fn [exp u]
                                     (str (helper/get-full-host service) u))]
@@ -101,19 +102,19 @@
                                          :host (:payload-host exp)
                                          {:keep-old-key true}))]]})
    (gen-exp-info info
-                 {:comment "absolute URL(bad get)"
+                 {:exp-name "absolute URL(bad get)"
                   :bc bc
                   :updates [[:url (fn [exp u]
                                     (str "http://" (:payload-host exp) u))]]})
    (gen-exp-info info
-                 {:comment "multi host"
+                 {:exp-name "multi host"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/insert-headers
                                          hdrs
                                          [["Host" (:payload-host exp)]]))]]})
    (gen-exp-info info
-                 {:comment "host line wrapping"
+                 {:exp-name "host line wrapping"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/insert-headers
@@ -122,7 +123,7 @@
                                          :host
                                          {:insert-before true}))]]})
    (gen-exp-info info
-                 {:comment "other host headers"
+                 {:exp-name "other host headers"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
                                         (utils/insert-headers
@@ -180,7 +181,7 @@
     (->> (build-exps req service bc)
          (map (fn [data]
                 {:service service
-                 :comment (:comment data)
+                 :exp-name (:exp-name data)
                  :payload-id (:payload-id data)
                  :request/raw (utils/build-request-raw data {:key-fn identity})})))))
 
@@ -239,8 +240,8 @@
 
 (def reg (scripts/reg-script! :host-check
                               {:name "host header check"
-                               :version "0.2.1"
-                               :min-burp-clj-version "0.4.8"
+                               :version "0.2.2"
+                               :min-burp-clj-version "0.4.9"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
