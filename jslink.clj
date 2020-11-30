@@ -6,6 +6,7 @@
             [burp-clj.validate :as validate]
             [burp-clj.helper :as helper]
             [burp-clj.issue :as issue]
+            [burp-clj.i18n :as i18n]
             [seesaw.core :as gui]
             [seesaw.bind :as bind]
             [seesaw.clipboard :as clip]
@@ -17,6 +18,46 @@
   (:import [javax.swing.event TableModelEvent TableModelListener]))
 
 ;;; Credit to https://github.com/GerbenJavado/LinkFinder for the idea and regex
+
+;;;;;; i18n
+(def translations
+  {:en {:missing       "**MISSING**"    ; Fallback for missing resources
+        :script-name "js link parse"
+        :issue {:name "js link parse"
+                :detail "Burp Scanner has analysed the following JS file for links: <b>%1</b><br><br>"
+                :background "JS files holds links to other parts of web applications. Refer to TAB for results."
+                :remediation-background "js links finder is an <b>informational</b> finding only.<br>"}
+        :copy "Copy"
+        :copy-tip "Copy selected links"
+        :copy-all "Copy All"
+        :copy-all-tip "Copy all links"
+        :delete "Delete"
+        :delete-tip "Delete selected links(Temporarily delete the link displayed in the list)"
+        :delete-selection "Delete selection"
+        :delete-selection-tip "Delete selected links(Temporarily delete)"
+        :delete-leading "Remove leadding [./]"
+        :delete-leading-tip "Remove the leadding [./] character of all links"
+        :total "Total:"
+        }
+
+   :zh {
+        ;; issue显示中文乱码
+        :script-name "js链接查找"
+        :copy "复制"
+        :copy-tip "复制选中链接"
+        :copy-all "全部复制"
+        :copy-all-tip "复制所有链接"
+        :delete "删除"
+        :delete-tip "删除选中链接(临时删除列表中显示的链接)"
+        :delete-selection "删除选中"
+        :delete-selection-tip "删除选中链接(临时删除)"
+        :delete-leading "删除链接前的./字符"
+        :delete-leading-tip "删除所有链接最开头的./字符"
+        :total "总计:"
+
+        }})
+
+(def tr (partial i18n/app-tr translations))
 
 ;;;;;; link parser
 (def str-delimiter "(?:\"|')")
@@ -108,14 +149,14 @@
         (when-let [links (scan-resp-links req-resp)]
           (swap! logs assoc url links)
           (-> (issue/make-issue {:url (.getUrl req-resp)
-                                 :name "js links finder"
+                                 :name (tr :issue/name)
                                  :confidence :certain
                                  :severity :info
                                  :http-messages [req-resp]
                                  :http-service service
-                                 :background "JS files holds links to other parts of web applications. Refer to TAB for results."
-                                 :remediation-background "js links finder is an <b>informational</b> finding only.<br>"
-                                 :detail (format "Burp Scanner has analysed the following JS file for links: <b>%s</b><br><br>" url)})
+                                 :background (tr :issue/background)
+                                 :remediation-background (tr :issue/remediation-background)
+                                 :detail (tr :issue/detail url)})
               list))))))
 
 (defn jslink-issue-check
@@ -126,12 +167,6 @@
   [links]
   (table/table-model :columns [{:key :link :text "link"}]
                      :rows (map #(hash-map :link %1) links)))
-
-(defn make-table-model-listener
-  [table-changed-fn]
-  (reify TableModelListener
-    (tableChanged [this e]
-      (table-changed-fn e))))
 
 (defn make-jslink-view
   []
@@ -177,31 +212,31 @@
         copy-action (gui/action :handler (fn [e]
                                            (-> (gui/selection link-list {:multi? true})
                                                copy-links-fn))
-                                :name "复制"
+                                :name (tr :copy)
                                 :enabled? false
-                                :tip "复制选中链接")
+                                :tip (tr :copy-tip))
         remove-action (gui/action :handler remove-select-fn
-                                  :name "删除"
+                                  :name (tr :delete)
                                   :enabled? false
-                                  :tip "删除选中链接(临时删除列表中显示的链接)")
+                                  :tip (tr :delete-tip))
         copy-all-action (gui/action :handler (fn [e]
                                                (-> (table/row-count link-list)
                                                    range
                                                    copy-links-fn))
-                                    :name "全部复制"
-                                    :tip "复制所有链接")
+                                    :name (tr :copy-all)
+                                    :tip (tr :copy-all-tip))
         link-list-panel  (mig-panel
                           :constraints [""
                                         "[][fill,grow]"
                                         "[][fill,grow]"]
-                          :items [["总计:"]
+                          :items [[(tr :total)]
                                   [(gui/label :id :lbl-total
                                               :text "")]
-                                  [(gui/button :text "删除选中"
-                                               :tip "删除选中链接(临时删除)"
+                                  [(gui/button :text (tr :delete-selection)
+                                               :tip (tr :delete-selection-tip)
                                                :listen [:action remove-select-fn])]
-                                  [(gui/button :text "删除链接前面的./字符"
-                                               :tip "删除所有链接最开头的./字符"
+                                  [(gui/button :text (tr :delete-leading)
+                                               :tip (tr :delete-leading-tip)
                                                :listen [:action remove-all-leading])
                                    "wrap, growx"]
 
@@ -225,7 +260,7 @@
     (gui/listen url-list :selection
                 (fn [e]
                   (let [add-model-listener (fn [model]
-                                             (->> (make-table-model-listener update-total-label)
+                                             (->> (utils/table-model-listener update-total-label)
                                                   (.addTableModelListener model))
                                              model)]
                     (some->> (gui/selection url-list {:multi? true})
@@ -255,9 +290,9 @@
 
 ;;;; extension info
 (def reg (scripts/reg-script! :jslink
-                              {:name "js link parse"
-                               :version "0.0.1"
-                               :min-burp-clj-version "0.4.1"
+                              {:name (tr :script-name)
+                               :version "0.1.1"
+                               :min-burp-clj-version "0.4.11"
                                :scanner-check {:scanner-check/jslink (jslink-issue-check)}
                                :tab {:jslink
                                      {:captain "JS Links"

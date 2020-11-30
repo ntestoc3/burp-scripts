@@ -5,9 +5,22 @@
             [burp-clj.scripts :as scripts]
             [burp-clj.proxy :as proxy]
             [burp-clj.helper :as helper]
+            [burp-clj.i18n :as i18n]
             [clojure.java.io :as io])
   (:import java.net.InetAddress))
 
+;;;;;; i18n
+(def translations
+  {:en {:missing       "**MISSING**"    ; Fallback for missing resources
+        :script-name "show ip location"
+        }
+
+   :zh {:script-name "显示ip地理位置"
+        }})
+
+(def tr (partial i18n/app-tr translations))
+
+;;;;;;;;;;
 (helper/add-dep-with-proxy '[[com.github.jarod/qqwry-java "0.8.0"]
                              [org.clojure/core.memoize "1.0.236"]])
 (import 'com.github.jarod.qqwry.QQWry)
@@ -56,8 +69,8 @@
   (proxy/make-proxy-proc ip-loc))
 
 (def reg (scripts/reg-script! :ip-location
-                              {:name "show ip location"
-                               :version "0.0.1"
-                               :min-burp-clj-version "0.1.0"
+                              {:name (tr :script-name)
+                               :version "0.2.0"
+                               :min-burp-clj-version "0.4.11"
                                :proxy-listener {:ip-loc/comment-loc (ip-loc-proxy)}
                                }))
