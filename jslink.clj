@@ -24,7 +24,7 @@
   {:en {:missing       "**MISSING**"    ; Fallback for missing resources
         :script-name "js link parse"
         :issue {:name "js link parse"
-                :detail "Burp Scanner has analysed the following JS file for links: <b>%1</b><br><br>"
+                :detail "Burp Scanner has analysed the following JS file contains %1 links: <b>%2</b><br><br>"
                 :background "JS files holds links to other parts of web applications. Refer to TAB for results."
                 :remediation-background "js links finder is an <b>informational</b> finding only.<br>"}
         :copy "Copy"
@@ -156,7 +156,7 @@
                                  :http-service service
                                  :background (tr :issue/background)
                                  :remediation-background (tr :issue/remediation-background)
-                                 :detail (tr :issue/detail url)})
+                                 :detail (tr :issue/detail (count links) url)})
               list))))))
 
 (defn jslink-issue-check
@@ -291,7 +291,7 @@
 ;;;; extension info
 (def reg (scripts/reg-script! :jslink
                               {:name (tr :script-name)
-                               :version "0.1.1"
+                               :version "0.1.2"
                                :min-burp-clj-version "0.4.11"
                                :scanner-check {:scanner-check/jslink (jslink-issue-check)}
                                :tab {:jslink

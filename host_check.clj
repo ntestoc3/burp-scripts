@@ -12,21 +12,93 @@
             [diehard.core :as dh]
             [seesaw.core :as gui]
             [taoensso.timbre :as log]
-            [seesaw.table :as table])
+            [seesaw.table :as table]
+            [burp-clj.i18n :as i18n]
+            [burp-clj.issue :as issue])
   (:use com.rpl.specter))
 
-(def cols-info [{:key :index :text "#" :class Long}
-                {:key :full-host :text "Host" :class String}
-                {:key :request/url :text "URL" :class String}
-                {:key :response/status :text "Resp.Status" :class Long}
-                {:key :response.headers/content-length :text "Resp.Len" :class String}
-                {:key :response.headers/content-type :text "Resp.type" :class String}
-                {:key :exp-name :text "exploit name" :class String}
-                {:key :payload-id :text "Payload id" :class String}
-                {:key :result :text "Result" :class String}
-                {:key :comment :text "Comment" :class String}
-                {:key :port :text "PORT" :class Long}
-                {:key :rtt :text "RTT(ms)" :class Double}])
+;;;;;; i18n
+(def translations
+  {:en {:missing       "**MISSING**"    ; Fallback for missing resources
+        :script-name "HOST header check"
+        :issue {:name "HOST header check"
+                :detail "Burp Scanner has analysed the following page has HOST ssrf <b>%1</b><br><br>"
+                :background "<a href='https://portswigger.net/web-security/host-header#what-is-an-http-host-header-attack'>What is an HTTP Host header attack?</a>"
+                :remediation-background "<a href='https://portswigger.net/web-security/host-header#how-to-prevent-http-host-header-attacks'>How to prevent HTTP Host header attacks</a>
+<br>"}
+        :payload-viewer-title "Payload Messages"
+        :collaborator-viewer-title "Collaborator client"
+        :col-host "Host"
+        :col-url "URL"
+        :col-response-status "Resp.Status"
+        :col-response-len "Resp.Len"
+        :col-response-type "Resp.type"
+        :col-exploit-name "exploit name"
+        :col-payload-id "Payload id"
+        :col-result "Result"
+        :col-comment "Comment"
+        :col-port "PORT"
+        :col-rtt "RTT(ms)"
+        :found-ssrf "FOUND SSRF!"
+        }
+
+   :zh {:script-name "HOST检测"
+        :payload-viewer-title "Payload消息列表"
+        :collaborator-viewer-title "反连检测客户端"
+        :col-host "主机"
+        :col-url "URL"
+        :col-response-status "响应状态码"
+        :col-response-len "响应长度"
+        :col-response-type "响应类型"
+        :col-exploit-name "exploit名称"
+        :col-payload-id "Payload id"
+        :col-result "结果"
+        :col-comment "注释"
+        :col-port "端口"
+        :col-rtt "往返时间(ms)"
+        :found-ssrf "发现SSRF!"
+        }})
+
+(def tr (partial i18n/app-tr translations))
+
+;;;;;;;;;;;
+
+(def cols-info [{:key :index
+                 :text "#"
+                 :class Long}
+                {:key :full-host
+                 :text (tr :col-host)
+                 :class String}
+                {:key :request/url
+                 :text (tr :col-url)
+                 :class String}
+                {:key :response/status
+                 :text (tr :col-response-status)
+                 :class Long}
+                {:key :response.headers/content-length
+                 :text (tr :col-response-len)
+                 :class String}
+                {:key :response.headers/content-type
+                 :text (tr :col-response-type)
+                 :class String}
+                {:key :exp-name :text
+                 (tr :col-exploit-name)
+                 :class String}
+                {:key :payload-id
+                 :text (tr :col-payload-id)
+                 :class String}
+                {:key :result
+                 :text (tr :col-result)
+                 :class String}
+                {:key :comment
+                 :text (tr :col-comment)
+                 :class String}
+                {:key :port
+                 :text (tr :col-port)
+                 :class Long}
+                {:key :rtt
+                 :text (tr :col-rtt)
+                 :class Double}])
 
 (defn gen-exp-info
   "生成exp信息
@@ -171,7 +243,8 @@
       (merge
        (helper/parse-http-req-resp return)
        (dissoc r :request/raw :service)
-       {:rtt time}))))
+       {:rtt time
+        :raw-req-resp return}))))
 
 (defn get-req-exp-service
   [req-resp bc]
@@ -187,12 +260,25 @@
 
 (defn update-table-found-payload
   [tbl payload-id]
-  (gui/invoke-later
-   (table-util/update-by! tbl
-                          #(= payload-id (:payload-id %1))
-                          #(assoc %1
-                                  :result "FOUND SSRF!"
-                                  :background :red))))
+  (let [payload-filter #(= payload-id (:payload-id %1))]
+    (doseq [{:keys [raw-req-resp]} (table-util/values-by tbl payload-filter)]
+      (let [url (.getUrl raw-req-resp)]
+        (-> (issue/make-issue {:url url
+                               :name (tr :issue/name)
+                               :confidence :certain
+                               :severity :medium
+                               :http-messages [raw-req-resp]
+                               :http-service (.getHttpService raw-req-resp)
+                               :background (tr :issue/background)
+                               :remediation-background (tr :issue/remediation-background)
+                               :detail (tr :issue/detail url)})
+            (issue/add-issue!))))
+    (gui/invoke-later
+     (table-util/update-by! tbl
+                            payload-filter
+                            #(assoc %1
+                                    :result (tr :found-ssrf)
+                                    :background :red)))))
 
 (defn host-header-check
   [msgs]
@@ -209,11 +295,11 @@
                              {:collaborator bc
                               :callback #(->> (:interaction-id %1)
                                               (update-table-found-payload msg-table))})
-        main-view (gui/tabbed-panel :tabs [{:title "Payload Messages"
+        main-view (gui/tabbed-panel :tabs [{:title (tr :payload-viewer-title)
                                             :content msg-viewer}
-                                           {:title "Collaborator client"
+                                           {:title (tr :collaborator-viewer-title)
                                             :content collaborator-viewer}])]
-    (utils/show-ui main-view {:title "host header check"})
+    (utils/show-ui main-view {:title (tr :script-name)})
     (future (thread-pool/upfor thread-pool-size
                                [[index info] (->> msgs
                                                   (mapcat #(get-req-exp-service %1 bc))
@@ -239,9 +325,9 @@
                                             (host-header-check)))])])))
 
 (def reg (scripts/reg-script! :host-check
-                              {:name "host header check"
-                               :version "0.2.2"
-                               :min-burp-clj-version "0.4.9"
+                              {:name (tr :script-name)
+                               :version "0.2.4"
+                               :min-burp-clj-version "0.4.12"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
