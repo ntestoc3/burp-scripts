@@ -22,7 +22,8 @@
   {:en {:missing       "**MISSING**"    ; Fallback for missing resources
         :script-name "HOST header check"
         :issue {:name "HOST header check"
-                :detail "Burp Scanner has analysed the following page has HOST ssrf <b>%1</b><br><br>"
+                :detail "Burp Scanner has analysed the following page has HOST ssrf <b>%1</b><br>
+exploit type: <b>%2</b><br>"
                 :background "<a href='https://portswigger.net/web-security/host-header#what-is-an-http-host-header-attack'>What is an HTTP Host header attack?</a>"
                 :remediation-background "<a href='https://portswigger.net/web-security/host-header#how-to-prevent-http-host-header-attacks'>How to prevent HTTP Host header attacks</a>
 <br>"}
@@ -261,7 +262,7 @@
 (defn update-table-found-payload
   [tbl payload-id]
   (let [payload-filter #(= payload-id (:payload-id %1))]
-    (doseq [{:keys [raw-req-resp]} (table-util/values-by tbl payload-filter)]
+    (doseq [{:keys [raw-req-resp exp-name]} (table-util/values-by tbl payload-filter)]
       (let [url (.getUrl raw-req-resp)]
         (-> (issue/make-issue {:url url
                                :name (tr :issue/name)
@@ -271,7 +272,7 @@
                                :http-service (.getHttpService raw-req-resp)
                                :background (tr :issue/background)
                                :remediation-background (tr :issue/remediation-background)
-                               :detail (tr :issue/detail url)})
+                               :detail (tr :issue/detail url exp-name)})
             (issue/add-issue!))))
     (gui/invoke-later
      (table-util/update-by! tbl
@@ -326,7 +327,7 @@
 
 (def reg (scripts/reg-script! :host-check
                               {:name (tr :script-name)
-                               :version "0.2.4"
+                               :version "0.2.5"
                                :min-burp-clj-version "0.4.12"
                                :context-menu {:host-check (host-check-menu)}}))
 
