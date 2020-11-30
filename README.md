@@ -7,7 +7,7 @@
 
 ## shiro-check 
 
-检测是否使用了shiro框架
+检测是否使用了shiro框架,如果发现则添加issue
 
 ## nrepl
 
@@ -19,7 +19,9 @@ comment中添加ip地址显示
 
 ## jslink
 
-查找js文件中的链接,方便处理和复制，用作burp Intruder的payload
+查找js文件中的链接,如果发现链接则添加issue
+
+结果界面方便处理和复制，用作burp Intruder的payload
 
 感谢 https://github.com/portswigger/js-link-finder 的burp插件思路
 
