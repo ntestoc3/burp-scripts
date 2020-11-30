@@ -13,8 +13,10 @@
             [seesaw.core :as gui]
             [taoensso.timbre :as log]
             [seesaw.table :as table]
+            [seesaw.mig :refer [mig-panel]]
             [burp-clj.i18n :as i18n]
-            [burp-clj.issue :as issue])
+            [burp-clj.issue :as issue]
+            [seesaw.border :as border])
   (:use com.rpl.specter))
 
 ;;;;;; i18n
@@ -41,6 +43,12 @@ exploit type: <b>%2</b><br>"
         :col-port "PORT"
         :col-rtt "RTT(ms)"
         :found-ssrf "FOUND SSRF!"
+        :number-of-threads "Number of threads:"
+        :number-of-retries "Number of retries on network failure:"
+        :pause-before-retry "Pause before retry(milliseconds):"
+        :request-timeout "Http timeout(milliseconds):"
+        :not-valid-number "Not a valid number %1."
+        :request-engine-setting-title "HOST header request setting"
         }
 
    :zh {:script-name "HOST检测"
@@ -58,6 +66,12 @@ exploit type: <b>%2</b><br>"
         :col-port "端口"
         :col-rtt "往返时间(ms)"
         :found-ssrf "发现SSRF!"
+        :number-of-threads "线程数量:"
+        :number-of-retries "网络错误时请求重试次数:"
+        :pause-before-retry "重试前等待时间(毫秒):"
+        :request-timeout "HTTP请求超时时间(毫秒):"
+        :not-valid-number "不是一个有效数字 %1."
+        :request-engine-setting-title "HOST header请求设置"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -223,22 +237,26 @@ exploit type: <b>%2</b><br>"
 
 ;; 用rate-limiter 按秒限速不实际，一个请求可能很长时间
 ;; bulkhead也没必要，直接限制线程池数量就可以了
-(def thread-pool-size 5)
+(extender/defsetting :host-check/threads-num 5 int?)
+(extender/defsetting :host-check/retries-count 3 int?)
+(extender/defsetting :host-check/retry-pause-ms 2000 int?)
+(extender/defsetting :host-check/request-timeout-ms 5000 int?)
+
 
 (defn make-req
   [{:keys [index] :as r}]
   (dh/with-retry {:retry-on Exception
                   :abort-on NullPointerException ;; http连接错误会造成NullPointerException
-                  :delay-ms 2000                 ;; 重试前等待时间
+                  :delay-ms (get-retry-pause-ms)                 ;; 重试前等待时间
                   :on-retry (fn [val ex]
                               (log/error "request " index "failed, retrying..." ex))
                   :on-failure (fn [_ ex]
                                 (log/warn "request " index "failed!" ex)
                                 (build-request-failed-msg r))
-                  :max-retries 3}
+                  :max-retries (get-retries-count)}
     (log/info "start request" index)
     (let [{:keys [return time]} (utils/time-execution
-                                 (dh/with-timeout {:timeout-ms 5000
+                                 (dh/with-timeout {:timeout-ms (get-request-timeout-ms)
                                                    :interrupt? true}
                                    (helper/send-http-raw (:request/raw r) (:service r))))]
       (merge
@@ -281,33 +299,76 @@ exploit type: <b>%2</b><br>"
                                     :result (tr :found-ssrf)
                                     :background :red)))))
 
+(defn number-input
+  [{:keys [get-fn set-fn]}]
+  (gui/text :text (str (get-fn))
+            :listen [:focus-lost
+                     (fn [e]
+                       (let [input-box (gui/to-widget e)
+                             n (gui/text input-box)]
+                         (try (-> (Integer/parseInt n)
+                                  (set-fn))
+                              (catch Exception e
+                                (log/error :input-number
+                                           (tr :not-valid-number n))
+                                (gui/invoke-later
+                                 (gui/text! input-box (str (get-fn))))))))]))
+
+(defn setting-form
+  []
+  (mig-panel
+   :border (border/empty-border :left 10 :top 10)
+   :items [[(tr :number-of-threads)]
+           [(number-input {:get-fn get-threads-num
+                           :set-fn set-threads-num!})
+            "wrap, grow"]
+
+           [(tr :number-of-retries)]
+           [(number-input {:get-fn get-retries-count
+                           :set-fn set-retries-count!})
+            "wrap, grow"]
+
+           [(tr :pause-before-retry)]
+           [(number-input {:get-fn get-retry-pause-ms
+                           :set-fn set-retry-pause-ms!})
+            "wrap, grow"]
+
+           [(tr :request-timeout)]
+           [(number-input {:get-fn get-request-timeout-ms
+                           :set-fn set-request-timeout-ms!})
+            "wrap, grow, wmin 200"]]))
+
 (defn host-header-check
   [msgs]
-  (let [bc (collaborator/create)
-        msg-viewer (message-viewer/http-message-viewer
-                    {:columns     cols-info
-                     :ac-words    (-> (first msgs)
-                                      helper/parse-http-req-resp
-                                      keys)
-                     :ken-fn :index
-                     :setting-key :host-check/intruder})
-        msg-table (gui/select msg-viewer [:#http-message-table])
-        collaborator-viewer (collaborator/make-ui
-                             {:collaborator bc
-                              :callback #(->> (:interaction-id %1)
-                                              (update-table-found-payload msg-table))})
-        main-view (gui/tabbed-panel :tabs [{:title (tr :payload-viewer-title)
-                                            :content msg-viewer}
-                                           {:title (tr :collaborator-viewer-title)
-                                            :content collaborator-viewer}])]
-    (utils/show-ui main-view {:title (tr :script-name)})
-    (future (thread-pool/upfor thread-pool-size
-                               [[index info] (->> msgs
-                                                  (mapcat #(get-req-exp-service %1 bc))
-                                                  (map-indexed vector))]
-                               (->> (assoc info :index index)
-                                    (make-req)
-                                    (table/add! msg-table))))))
+  (when (= :success
+           (utils/conform-dlg {:content (setting-form)
+                               :title (tr :request-engine-setting-title)}))
+    (let [bc (collaborator/create)
+          msg-viewer (message-viewer/http-message-viewer
+                      {:columns     cols-info
+                       :ac-words    (-> (first msgs)
+                                        helper/parse-http-req-resp
+                                        keys)
+                       :ken-fn :index
+                       :setting-key :host-check/intruder})
+          msg-table (gui/select msg-viewer [:#http-message-table])
+          collaborator-viewer (collaborator/make-ui
+                               {:collaborator bc
+                                :callback #(->> (:interaction-id %1)
+                                                (update-table-found-payload msg-table))})
+          main-view (gui/tabbed-panel :tabs [{:title (tr :payload-viewer-title)
+                                              :content msg-viewer}
+                                             {:title (tr :collaborator-viewer-title)
+                                              :content collaborator-viewer}])]
+      (utils/show-ui main-view {:title (tr :script-name)})
+      (future (thread-pool/upfor thread-pool-size
+                                 [[index info] (->> msgs
+                                                    (mapcat #(get-req-exp-service %1 bc))
+                                                    (map-indexed vector))]
+                                 (helper/with-exception-default nil
+                                   (->> (assoc info :index index)
+                                        (make-req)
+                                        (table/add! msg-table))))))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
@@ -328,7 +389,7 @@ exploit type: <b>%2</b><br>"
 (def reg (scripts/reg-script! :host-check
                               {:name (tr :script-name)
                                :version "0.2.5"
-                               :min-burp-clj-version "0.4.12"
+                               :min-burp-clj-version "0.4.13"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
