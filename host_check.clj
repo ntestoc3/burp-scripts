@@ -50,6 +50,10 @@ exploit type: <b>%2</b><br>"
         :not-valid-number "Not a valid number %1."
         :request-engine-setting-title "HOST header request setting"
         :scan-over "Scan over!"
+        :request-failed "Request FAILED"
+        :request-start "Requesting..."
+        :request-over "Request Over"
+        :request-retry "Retry %1 times."
         }
 
    :zh {:script-name "HOST检测"
@@ -74,6 +78,10 @@ exploit type: <b>%2</b><br>"
         :not-valid-number "不是一个有效数字 %1."
         :request-engine-setting-title "HOST header请求设置"
         :scan-over "扫描结束!"
+        :request-failed "请求失败!"
+        :request-start "请求中..."
+        :request-over "请求完成"
+        :request-retry "第%1次重试"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -226,16 +234,18 @@ exploit type: <b>%2</b><br>"
                                          :host
                                          {:insert-before true}))]]})])
 
-(defn build-request-failed-msg
-  [{:keys [service comment] :as req-info}]
-  (merge
-   (helper/parse-http-service service)
-   (helper/flatten-format-req-resp (:request/raw req-info) :request)
-   (dissoc req-info :service)
-   {:full-host (helper/get-full-host service)
-    :rtt -1
-    :comment (str "FAILED! " comment)
-    :foreground :gray}))
+(defn build-request-msg
+  "构造请求消息，不包含响应
+
+  `opts` 返回消息中包含的额外数据"
+  ([req-info] (build-request-msg req-info nil))
+  ([{:keys [service] :as req-info} opts]
+   (merge
+    (helper/parse-http-service service)
+    (helper/flatten-format-req-resp (:request/raw req-info) :request)
+    (dissoc req-info :service)
+    {:full-host (helper/get-full-host service)}
+    opts)))
 
 ;; 用rate-limiter 按秒限速不实际，一个请求可能很长时间
 ;; bulkhead也没必要，直接限制线程池数量就可以了
@@ -246,30 +256,45 @@ exploit type: <b>%2</b><br>"
 
 
 (defn make-req
-  [{:keys [index] :as r}]
-  (dh/with-retry {:retry-on Exception
-                  :abort-on NullPointerException ;; http连接错误会造成NullPointerException
-                  :delay-ms (get-retry-pause-ms)                 ;; 重试前等待时间
-                  :fallback (fn [_ ex]
-                              (log/info "make req index:" index "fallback return.")
-                              (build-request-failed-msg r))
-                  :on-abort (fn [val ex]
-                              (log/error "request " index "aborted."))
-                  :on-retry (fn [val ex]
-                              (log/error "request " index "failed, retrying..." ex))
-                  ;; :on-failure (fn [_ ex]
-                  ;;               (log/warn "request " index "failed!" ex))
-                  :max-retries (get-retries-count)}
-    (log/info "start request" index)
-    (let [{:keys [return time]} (utils/time-execution
-                                 (dh/with-timeout {:timeout-ms (get-request-timeout-ms)
-                                                   :interrupt? true}
-                                   (helper/send-http-raw (:request/raw r) (:service r))))]
-      (merge
-       (helper/parse-http-req-resp return)
-       (dissoc r :request/raw :service)
-       {:rtt time
-        :raw-req-resp return}))))
+  [tbl {:keys [index] :as r}]
+  (let [retry-count (atom 0)]
+    (dh/with-retry {:retry-on Exception
+                    :abort-on NullPointerException ;; http连接错误会造成NullPointerException
+                    :delay-ms (get-retry-pause-ms) ;; 重试前等待时间
+                    :fallback (fn [_ ex]
+                                (log/info "make req index:" index "fallback.")
+                                (table-util/update-by! tbl
+                                                       #(= index (:index %1))
+                                                       (fn [_]
+                                                         {:rtt -1
+                                                          :result (tr :request-failed)
+                                                          :foreground :gray})))
+                    :on-retry (fn [val ex]
+                                (log/error "request " index "failed, retrying..." ex)
+                                (swap! retry-count inc)
+                                (table-util/update-by! tbl
+                                                       #(= index (:index %1))
+                                                       (fn [_]
+                                                         {:result (tr :request-retry @retry-count)})))
+                    ;; :on-failure (fn [_ ex]
+                    ;;               (log/warn "request " index "failed!" ex))
+                    :max-retries (get-retries-count)}
+      (log/info "start request" index)
+      (let [{:keys [return time]} (utils/time-execution
+                                   (dh/with-timeout {:timeout-ms (get-request-timeout-ms)
+                                                     :interrupt? true}
+                                     (helper/send-http-raw (:request/raw r) (:service r))))
+
+            result (merge
+                    (helper/parse-http-req-resp return)
+                    (dissoc r :request/raw :service)
+                    {:rtt time
+                     :result (tr :request-over)
+                     :raw-req-resp return})]
+        (table-util/update-by! tbl
+                               #(= index (:index %1))
+                               (fn [_]
+                                 result))))))
 
 (defn get-req-exp-service
   [req-resp bc]
@@ -284,6 +309,7 @@ exploit type: <b>%2</b><br>"
                  :request/raw (utils/build-request-raw data {:key-fn identity})})))))
 
 (defn update-table-found-payload
+  "发现SSRF时进行数据更新"
   [tbl payload-id]
   (let [payload-filter #(= payload-id (:payload-id %1))]
     (doseq [{:keys [raw-req-resp exp-name]} (table-util/values-by tbl payload-filter)]
@@ -387,13 +413,13 @@ exploit type: <b>%2</b><br>"
                 [[index info] (->> msgs
                                    (mapcat #(get-req-exp-service %1 bc))
                                    (map-indexed vector))]
+                (->> (build-request-msg info {:index index
+                                              :result (tr :request-start)})
+                     (table/add! msg-table))
                 (when-not (thread-pool/shutdown? pool)
                   (helper/with-exception-default nil
-                    (let [result (->> (assoc info :index index)
-                                      (make-req)
-                                      )]
-                      (log/info "request" index "exp-name:" (:exp-name result) "port:" (:port result))
-                      (table/add! msg-table result)))))
+                    (->> (assoc info :index index)
+                         (make-req msg-table)))))
                (catch Exception e
                  (log/error "host-check run request engine.")))
           (log/info "host-check over!")
