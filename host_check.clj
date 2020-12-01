@@ -49,6 +49,7 @@ exploit type: <b>%2</b><br>"
         :request-timeout "Http timeout(milliseconds):"
         :not-valid-number "Not a valid number %1."
         :request-engine-setting-title "HOST header request setting"
+        :scan-over "Scan over!"
         }
 
    :zh {:script-name "HOST检测"
@@ -72,6 +73,7 @@ exploit type: <b>%2</b><br>"
         :request-timeout "HTTP请求超时时间(毫秒):"
         :not-valid-number "不是一个有效数字 %1."
         :request-engine-setting-title "HOST header请求设置"
+        :scan-over "扫描结束!"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -248,11 +250,15 @@ exploit type: <b>%2</b><br>"
   (dh/with-retry {:retry-on Exception
                   :abort-on NullPointerException ;; http连接错误会造成NullPointerException
                   :delay-ms (get-retry-pause-ms)                 ;; 重试前等待时间
+                  :fallback (fn [_ ex]
+                              (log/info "make req index:" index "fallback return.")
+                              (build-request-failed-msg r))
+                  :on-abort (fn [val ex]
+                              (log/error "request " index "aborted."))
                   :on-retry (fn [val ex]
                               (log/error "request " index "failed, retrying..." ex))
-                  :on-failure (fn [_ ex]
-                                (log/warn "request " index "failed!" ex)
-                                (build-request-failed-msg r))
+                  ;; :on-failure (fn [_ ex]
+                  ;;               (log/warn "request " index "failed!" ex))
                   :max-retries (get-retries-count)}
     (log/info "start request" index)
     (let [{:keys [return time]} (utils/time-execution
@@ -338,6 +344,13 @@ exploit type: <b>%2</b><br>"
                            :set-fn set-request-timeout-ms!})
             "wrap, grow, wmin 200"]]))
 
+
+(def test-view (atom nil))
+(comment
+  (def tbl (gui/select @test-view [:#http-message-table]))
+
+  )
+
 (defn host-header-check
   [msgs]
   (when (= :success
@@ -359,16 +372,33 @@ exploit type: <b>%2</b><br>"
           main-view (gui/tabbed-panel :tabs [{:title (tr :payload-viewer-title)
                                               :content msg-viewer}
                                              {:title (tr :collaborator-viewer-title)
-                                              :content collaborator-viewer}])]
-      (utils/show-ui main-view {:title (tr :script-name)})
-      (future (thread-pool/upfor thread-pool-size
-                                 [[index info] (->> msgs
-                                                    (mapcat #(get-req-exp-service %1 bc))
-                                                    (map-indexed vector))]
-                                 (helper/with-exception-default nil
-                                   (->> (assoc info :index index)
-                                        (make-req)
-                                        (table/add! msg-table))))))))
+                                              :content collaborator-viewer}])
+          win (utils/show-ui main-view {:title (tr :script-name)})]
+      (reset! test-view main-view)
+      (future
+        (let [pool (thread-pool/threadpool (get-threads-num)
+                                           :name "host-check request pool")]
+          (gui/listen win :window-closing
+                      (fn [e]
+                        (log/info "host-check window closing.")
+                        (thread-pool/shutdown! pool)))
+          (try (thread-pool/pdoseq
+                pool
+                [[index info] (->> msgs
+                                   (mapcat #(get-req-exp-service %1 bc))
+                                   (map-indexed vector))]
+                (when-not (thread-pool/shutdown? pool)
+                  (helper/with-exception-default nil
+                    (let [result (->> (assoc info :index index)
+                                      (make-req)
+                                      )]
+                      (log/info "request" index "exp-name:" (:exp-name result) "port:" (:port result))
+                      (table/add! msg-table result)))))
+               (catch Exception e
+                 (log/error "host-check run request engine.")))
+          (log/info "host-check over!")
+          (when-not (thread-pool/shutdown? pool)
+            (gui/alert (tr :scan-over))))))))
 
 (def menu-context #{:message-editor-request
                     :message-viewer-request
