@@ -99,7 +99,7 @@ exploit type: <b>%2</b><br>"
                  :class String}
                 {:key :response/status
                  :text (tr :col-response-status)
-                 :class Long}
+                 :class Integer}
                 {:key :response.headers/content-length
                  :text (tr :col-response-len)
                  :class String}
