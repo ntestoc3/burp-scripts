@@ -14,7 +14,8 @@
             [seesaw.mig :refer [mig-panel]]
             [taoensso.timbre :as log]
             [clojure.string :as str]
-            [seesaw.table :as table])
+            [seesaw.table :as table]
+            [burp-clj.context-menu :as context-menu])
   (:import [javax.swing.event TableModelEvent TableModelListener]))
 
 ;;; Credit to https://github.com/GerbenJavado/LinkFinder for the idea and regex
@@ -38,6 +39,7 @@
         :delete-leading "Remove leadding [./]"
         :delete-leading-tip "Remove the leadding [./] character of all links"
         :total "Total:"
+        :menu-jslink "Send Responses to js link parse"
         }
 
    :zh {
@@ -54,7 +56,7 @@
         :delete-leading "删除链接前的./字符"
         :delete-leading-tip "删除所有链接最开头的./字符"
         :total "总计:"
-
+        :menu-jslink "发送到js link parse分析Response"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -158,6 +160,23 @@
                                  :remediation-background (tr :issue/remediation-background)
                                  :detail (tr :issue/detail (count links) url)})
               list))))))
+
+(def menu-context #{:message-editor-response
+                    :message-viewer-response
+                    :intruder-attack-results
+                    :target-site-map-table
+                    :proxy-history})
+
+(defn jslink-menu []
+  (context-menu/make-context-menu
+   menu-context
+   (fn [invocation]
+     [(gui/menu-item :text (tr :menu-jslink)
+                     :enabled? true
+                     :listen [:action (fn [_]
+                                        (future
+                                          (->> (context-menu/get-selected-messge invocation)
+                                               (pmap passive-scan))))])])))
 
 (defn jslink-issue-check
   []
@@ -293,6 +312,7 @@
                               {:name (tr :script-name)
                                :version "0.1.2"
                                :min-burp-clj-version "0.4.11"
+                               :context-menu {:js-link (jslink-menu)}
                                :scanner-check {:scanner-check/jslink (jslink-issue-check)}
                                :tab {:jslink
                                      {:captain "JS Links"

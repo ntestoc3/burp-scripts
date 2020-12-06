@@ -21,7 +21,10 @@ comment中添加ip地址显示
 
 查找js文件中的链接,如果发现链接则添加issue
 
+或者手动选择消息进行分析,在burp重启后方便重新获取链接
+
 结果界面方便处理和复制，用作burp Intruder的payload
+
 
 感谢 https://github.com/portswigger/js-link-finder 的burp插件思路
 
