@@ -2,21 +2,26 @@ style: github
 template: CHANGELOG.tpl.md
 info:
   title: CHANGELOG
-  repository_url: ""
+  repository_url: "https://github.com/ntestoc3/burp-scripts"
 options:
   commits:
-    # filters:
-    #   Type:
-    #     - feat
-    #     - fix
-    #     - perf
-    #     - refactor
+    filters:
+      Type:
+        - feat
+        - fix
+        - perf
+        - refactor
+    sort_by: Scope
+
   commit_groups:
-    # title_maps:
-    #   feat: Features
-    #   fix: Bug Fixes
-    #   perf: Performance Improvements
-    #   refactor: Code Refactoring
+    group_by: Type
+    sort_by: Title
+    title_maps:
+      feat: 新功能
+      fix: Bug修复
+      perf: 性能改进
+      refactor: 代码重构
+
   header:
     pattern: "^(\\w*)(?:\\(([\\w\\$\\.\\-\\*\\s]*)\\))?\\:\\s(.*)$"
     pattern_maps:
