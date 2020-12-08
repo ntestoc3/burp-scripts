@@ -40,3 +40,6 @@ comment中添加ip地址显示
   使用方法: 右键选择Send request to Host-Header-check
   
   感谢 https://portswigger.net/web-security/host-header/exploiting#how-to-test-for-vulnerabilities-using-the-http-host-header 提供的检测方法
+
+## webpack
+  检测js map文件，如果包含源码则还原整个webpack.

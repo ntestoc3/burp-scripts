@@ -312,9 +312,9 @@
                               {:name (tr :script-name)
                                :version "0.1.2"
                                :min-burp-clj-version "0.4.11"
-                               :context-menu {:js-link (jslink-menu)}
-                               :scanner-check {:scanner-check/jslink (jslink-issue-check)}
-                               :tab {:jslink
+                               :context-menu {:jslink/context-menu (jslink-menu)}
+                               :scanner-check {:jslink/jslink-scan (jslink-issue-check)}
+                               :tab {:jslink/result-tab
                                      {:captain "JS Links"
                                       :view (make-jslink-view)}}}))
 
