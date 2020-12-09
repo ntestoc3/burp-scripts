@@ -24,7 +24,7 @@
   {:en {:missing       "**MISSING**"    ; Fallback for missing resources
         :script-name "webpack unmap"
         :issue {:name "webpack unmap"
-                :detail "Burp Scanner has analysed the following JS mapping files can be accessed: <b>%1</b><br>%2<br>"
+                :detail "Burp Scanner has analysed the following JS mapping files can be accessed: <b>%1</b><br>unpacked js to: <b>%2</b><br>%3<br>"
                 :background "JS Source map files disclosure."
                 :remediation-background "<a href='https://cwe.mitre.org/data/definitions/540.html'>CWE-540: Inclusion of Sensitive Information in Source Code</a>"}
         :save-dir-info "Save dir root:"
@@ -165,13 +165,14 @@
 
   `webpack-root` 已解压的js map文件的根目录"
   [webpack-root]
-  (let [bootstrap (fs/file webpack-root "webpack/bootstrap")]
-    (when (fs/exists? bootstrap)
-      (when-some [chuncks (->> (slurp bootstrap)
-                               (re-find  #"\+\s*(\{.*\})\[chunkId\]\s*\+\s*\"\.js\"")
-                               second)]
-        (-> (str/replace chuncks ":" " ")
-            (clojure.edn/read-string))))))
+  (when-let [bootstrap (-> (fs/file webpack-root "webpack/")
+                           (fs/glob "bootstrap*")
+                           first)]
+    (when-some [chuncks (->> (slurp bootstrap)
+                             (re-find  #"\+\s*(\{.*\})\[chunkId\]\s*\+\s*\"\.js\"")
+                             second)]
+      (-> (str/replace chuncks ":" " ")
+          (clojure.edn/read-string)))))
 
 (defn find-all-chuncks-filename
   "查找并获取所有chuncks的文件名"
@@ -200,44 +201,44 @@
   [service req-info file-name]
   (let [new-req-info (update req-info
                              :url
-                             #(str (get-file-parent %1) "/" file-name))]
-    (when-let [req-resp (fetch-json-file service new-req-info)]
-      (let [data (-> (.getResponse req-resp)
-                     (utils/parse-response)
-                     :body)
-            jsmap-dir (fs/file (get-save-dir)
-                               (:host service)
-                               (get-jsmap-root))
-            webpack-dir (fs/file (get-save-dir)
-                                 (:host service)
-                                 (get-webpack-root))
-            local-file-path (fs/file jsmap-dir file-name)]
-        (log/info :save-unpack-jsmap "save to" local-file-path)
-        (fs/mkdirs jsmap-dir)
-        (fs/mkdirs webpack-dir)
-        (spit local-file-path data)
-        (unwebpack data webpack-dir)
-        req-resp))))
+                             #(str (get-file-parent %1) "/" file-name))
+        jsmap-dir (fs/file (get-save-dir)
+                           (:host service)
+                           (get-jsmap-root))
+        webpack-dir (fs/file (get-save-dir)
+                             (:host service)
+                             (get-webpack-root))
+        local-file-path (fs/file jsmap-dir file-name)]
+    (if (fs/exists? local-file-path)
+      (log/info :save-unpack-jsmap local-file-path "already exists!")
+      (when-let [req-resp (fetch-json-file service new-req-info)]
+        (let [data (-> (.getResponse req-resp)
+                       (utils/parse-response)
+                       :body)]
+          (log/info :save-unpack-jsmap "save to" local-file-path)
+          (fs/mkdirs jsmap-dir)
+          (fs/mkdirs webpack-dir)
+          (spit local-file-path data)
+          (unwebpack data webpack-dir)
+          req-resp)))))
 
-(def jsmap-req> (async/chan 32))
-(def kill> (async/chan))
-(def err< (async/chan))
+(declare jsmap-req
+         jsmap-error
+         kill>)
 
 (defn jsmap-error-handler
   []
-  (async/go-loop [coll (async/alts! [kill> err<] :priority true)]
-    (let [[e ch] coll]
-      (if (= ch kill>)
-        (log/info :error-handler "shutdown")
-        (do (if (string? e)
-              (log/error e)
-              (log/error (.getMessage e)))
-            (recur (async/alts! [kill> err<] :priority true)))))))
+  (async/go-loop []
+    (let [e (async/<! jsmap-error)]
+      (if (string? e)
+        (log/error e)
+        (log/error (.getMessage e))))
+    (recur)))
 
 (defn start-jsmap-service
   []
   (log/info :jsmap-service "start.")
-  (async/go-loop [coll (async/alts! [kill> jsmap-req>] :priority true)]
+  (async/go-loop [coll (async/alts! [kill> jsmap-req] :priority true)]
     (let [[x ch] coll]
       (if (= ch kill>)
         (log/info :jsmap-service "recevie msg in kill> channel; shutdown")
@@ -276,12 +277,26 @@
                                          :remediation-background (tr :issue/remediation-background)
                                          :detail (tr :issue/detail
                                                      url
+                                                     (str webpack-dir)
                                                      chunck-infos)})
                       (issue/add-issue!))
                   (log/info :jsmap-service "add new issue:" (.getUrl ok-req-resp)))))
             (catch Exception e
-              (async/>! err< e)))
-          (recur (async/alts! [kill> jsmap-req>] :priority true)))))))
+              (async/>! jsmap-error e)))
+          (recur (async/alts! [kill> jsmap-req] :priority true)))))))
+
+(defonce --init--
+  (do
+    ;; 多次加载脚本只执行一次， 加载后不再退出
+
+    (def jsmap-req (async/chan 32))
+    (def jsmap-error (async/chan))
+    ;; kill> 用于测试service 停止
+    (def kill> (async/chan))
+
+    (jsmap-error-handler)
+    (start-jsmap-service)))
+
 
 (defn jsmap-scan
   [req-resp]
@@ -299,9 +314,9 @@
                      (:host service)
                      file-name)))
       (log/info :jsmap-scan "get" file-name)
-      (async/put! jsmap-req> {:service service
-                              :file-name file-name
-                              :req-resp req-resp})
+      (async/put! jsmap-req {:service service
+                             :file-name file-name
+                             :req-resp req-resp})
       nil)))
 
 (defn jsmap-issue-check
@@ -349,11 +364,6 @@
                                :version "0.1.0"
                                :min-burp-clj-version "0.4.14"
                                :scanner-check {:webpack/jsmap-scan (jsmap-issue-check)}
-                               :enable-callback (fn [_]
-                                                  (start-jsmap-service)
-                                                  (jsmap-error-handler))
-                               :disable-callback (fn [_]
-                                                   (async/put! kill> true))
                                :tab {:webpack/setting
                                      {:captain (tr :webpack-setting)
                                       :view (make-webpack-setting)}}}))
