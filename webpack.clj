@@ -16,6 +16,7 @@
             [taoensso.timbre :as log]
             [burp-clj.i18n :as i18n]
             [burp-clj.issue :as issue]
+            [clojure.core.async :as async]
             [seesaw.border :as border]))
 
 ;;;; i18n
@@ -94,7 +95,10 @@
               (catch com.fasterxml.jackson.core.JsonParseException _
                 (log/error :fetch-json-file "parse js map file error"
                            "url:" url
-                           "body:" data)))))))))
+                           "body:" (when data
+                                     (subs data 0
+                                           (min 128
+                                                (count data)))))))))))))
 
 (defn canonical-path
   "获取文件的绝对路径，去掉./ ../"
@@ -215,6 +219,70 @@
         (unwebpack data webpack-dir)
         req-resp))))
 
+(def jsmap-req> (async/chan 32))
+(def kill> (async/chan))
+(def err< (async/chan))
+
+(defn jsmap-error-handler
+  []
+  (async/go-loop [coll (async/alts! [kill> err<] :priority true)]
+    (let [[e ch] coll]
+      (if (= ch kill>)
+        (log/info :error-handler "shutdown")
+        (do (if (string? e)
+              (log/error e)
+              (log/error (.getMessage e)))
+            (recur (async/alts! [kill> err<] :priority true)))))))
+
+(defn start-jsmap-service
+  []
+  (log/info :jsmap-service "start.")
+  (async/go-loop [coll (async/alts! [kill> jsmap-req>] :priority true)]
+    (let [[x ch] coll]
+      (if (= ch kill>)
+        (log/info :jsmap-service "recevie msg in kill> channel; shutdown")
+        (do
+          (try
+            (log/info :jsmap-service "recv" x)
+            (let [{:keys [service req-resp file-name]} x
+                  req-info (utils/parse-request (.getRequest req-resp))
+                  ok-req-resp (-> (async/thread
+                                    (save-unpack-jsmap service req-info file-name))
+                                  async/<!)]
+              (when ok-req-resp
+                (let [url (.getUrl ok-req-resp)
+                      webpack-dir (fs/file (get-save-dir)
+                                           (:host service)
+                                           (get-webpack-root))
+                      chunck-files (find-all-chuncks-filename webpack-dir)
+                      chunck-infos (when-not (empty? chunck-files)
+                                     (log/info :save-unpack-jsmap
+                                               "found chuncks total:"
+                                               (count chunck-files))
+                                     (doseq [file-name chunck-files]
+                                       (-> (async/thread
+                                             (save-unpack-jsmap service req-info file-name))
+                                           async/<!))
+                                     (str "and found <b>chunck files</b>:<br>"
+                                          (str/join "<br>" chunck-files)))]
+                  ;; 返回issue list会添加失败
+                  (-> (issue/make-issue {:url url
+                                         :name (tr :issue/name)
+                                         :confidence :certain
+                                         :severity :info
+                                         :http-messages [req-resp]
+                                         :http-service (helper/->http-service service)
+                                         :background (tr :issue/background)
+                                         :remediation-background (tr :issue/remediation-background)
+                                         :detail (tr :issue/detail
+                                                     url
+                                                     chunck-infos)})
+                      (issue/add-issue!))
+                  (log/info :jsmap-service "add new issue:" (.getUrl ok-req-resp)))))
+            (catch Exception e
+              (async/>! err< e)))
+          (recur (async/alts! [kill> jsmap-req>] :priority true)))))))
+
 (defn jsmap-scan
   [req-resp]
   (let [service (-> (.getHttpService req-resp)
@@ -231,35 +299,10 @@
                      (:host service)
                      file-name)))
       (log/info :jsmap-scan "get" file-name)
-      (let [req-info (utils/parse-request (.getRequest req-resp))]
-        (when-let [ok-req-resp (save-unpack-jsmap service req-info file-name)]
-          (let [url (.getUrl req-resp)
-                webpack-dir (fs/file (get-save-dir)
-                                     (:host service)
-                                     (get-webpack-root))
-                chunck-files (find-all-chuncks-filename webpack-dir)
-                chunck-infos (when-not (empty? chunck-files)
-                               (log/info :save-unpack-jsmap
-                                         "found chuncks total:"
-                                         (count chunck-files))
-                               (doseq [file-name chunck-files]
-                                 (save-unpack-jsmap service req-info file-name))
-                               (str "and found chunck files:"
-                                    (str/join "<br>" chunck-files)))]
-            (try (-> (issue/make-issue {:url url
-                                        :name (tr :issue/name)
-                                        :confidence :certain
-                                        :severity :info
-                                        :http-messages [req-resp]
-                                        :http-service (helper/->http-service service)
-                                        :background (tr :issue/background)
-                                        :remediation-background (tr :issue/remediation-background)
-                                        :detail (tr :issue/detail
-                                                    (.getUrl ok-req-resp)
-                                                    chunck-infos)})
-                     list)
-                 (catch Exception e
-                   (log/error :jsmap-scan "make issue error:" e)))))))))
+      (async/put! jsmap-req> {:service service
+                              :file-name file-name
+                              :req-resp req-resp})
+      nil)))
 
 (defn jsmap-issue-check
   []
@@ -306,6 +349,11 @@
                                :version "0.1.0"
                                :min-burp-clj-version "0.4.14"
                                :scanner-check {:webpack/jsmap-scan (jsmap-issue-check)}
+                               :enable-callback (fn [_]
+                                                  (start-jsmap-service)
+                                                  (jsmap-error-handler))
+                               :disable-callback (fn [_]
+                                                   (async/put! kill> true))
                                :tab {:webpack/setting
                                      {:captain (tr :webpack-setting)
                                       :view (make-webpack-setting)}}}))
