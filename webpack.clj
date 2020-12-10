@@ -8,6 +8,7 @@
             [cheshire.core :as json]
             [me.raynes.fs :as fs]
             [clojure.java.io :as io]
+            [clojure.java.browse :refer [browse-url]]
             [clojure.string :as str]
             [com.climate.claypoole :as thread-pool]
             [diehard.core :as dh]
@@ -34,6 +35,7 @@
         :webpack-root-info "webpack root path:"
         :webpack-root-tip "The unpacked webpack file is saved in this path"
         :webpack-setting "webpack setting"
+        :open-dir "Open"
         }
 
    :zh {
@@ -46,6 +48,7 @@
         :webpack-root-info "webpack文件路径:"
         :webpack-root-tip "解压的webpack文件在此路径下保存"
         :webpack-setting "webpack设置"
+        :open-dir "打开"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -338,6 +341,9 @@
                                     set-save-dir!)])
             "grow, wmin 300"]
 
+           [(gui/button :text (tr :open-dir)
+                        :listen [:action (fn [_]
+                                           (browse-url (get-save-dir)))])]
            [(bui/choose-dir-btn (get-save-dir) [:#save-dir-txt])
             "wrap"]
 
