@@ -43,3 +43,7 @@ comment中添加ip地址显示
 
 ## webpack
   检测js map文件，如果包含源码则还原整个webpack.
+
+## save response
+  保存选中项的response body到指定目录，保持网站目录结构
+
