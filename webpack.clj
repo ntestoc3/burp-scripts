@@ -127,7 +127,9 @@
   "格式化webpack路径，转换.为_dot"
   [p]
   (-> (str/replace p #"^webpack:///" "")
-      (str/replace #"^\./" "_dot/")))
+      (str/replace #"^\./" "_dot/")
+      (str/replace #"^/" "_root/")
+      (str/replace #"^\.\./" "_parent/")))
 
 (defn unwebpack
   "解压webpack文件
@@ -144,7 +146,8 @@
                 "sources content count:" (count (:sourcesContent web-pack))))
     (doseq [[index source-path] (->> (:sources web-pack)
                                      (map-indexed vector))]
-      (let [save-path (fs/file save-dir (format-webpack-path source-path))]
+      (let [source-path (format-webpack-path source-path)
+            save-path (fs/file save-dir source-path)]
         (if (sub-dir? source-path save-dir)
           (do
             (log/info :unwebpack "save to" save-path)
@@ -156,33 +159,80 @@
                      "save dir:" save-dir
                      "save path:" save-path))))))
 
-(defn get-chunck-filename
-  [chunck-id chuncks]
-  (str chunck-id
-       "."
-       (get chuncks chunck-id)
-       ".js.map"))
+(defn group [& args]
+  (str "(" (str/join args) ")"))
+
+(def chunck-pattren
+  (-> (str
+       "[\\s\\+]+"
+
+       (group
+        "\\((\\{.*\\})\\[chunkId\\]\\|\\|chunkId\\)"
+        "|"
+        "\"chunkId\"")
+
+       "[\\s\\+]+"
+
+       "\""
+       (group "[.-]")
+       "\""
+
+       "[\\s\\+]+"
+
+       (group
+        "(\\{.*\\})\\[chunkId\\]"
+        "|"
+        "\"[a-f\\d]+\"")
+
+       "[\\s\\+]+"
+
+       "\".js\"")
+      (re-pattern)))
+
+(defn parse-js-chunck-name
+  [data]
+  (let [[_ _  pre sep fixed-post post] (re-find chunck-pattren data)]
+    (cond
+      ;; 前缀就是chunk id
+      (nil? pre)
+      (->> (json/decode post)
+           (map (fn [[k v]] (str k sep v))))
+
+      ;; 同时有前缀和后缀
+      (and pre post)
+      (let [pre (json/decode pre)
+            post (json/decode post)]
+        (->> (keys post)
+             (map #(str (get pre %1 %1)
+                        sep
+                        (get post %1)))))
+
+      ;; 固定后缀
+      (and pre fixed-post)
+      (let [post (json/decode fixed-post)]
+        (->> (json/decode pre)
+             (vals)
+             (map #(str %1 sep post))))
+
+      :else
+      nil)))
 
 (defn find-chuncks
-  "查找所有chuncks,格式为{chunck-id chunck-tag ...}
+  "查找所有chuncks,返回chunck文件名列表
 
   `webpack-root` 已解压的js map文件的根目录"
   [webpack-root]
   (when-let [bootstrap (-> (fs/file webpack-root "webpack/")
                            (fs/glob "bootstrap*")
                            first)]
-    (when-some [chuncks (->> (slurp bootstrap)
-                             (re-find  #"\+\s*(\{.*\})\[chunkId\]\s*\+\s*\"\.js\"")
-                             second)]
-      (-> (str/replace chuncks ":" " ")
-          (clojure.edn/read-string)))))
+    (->> (slurp bootstrap)
+         parse-js-chunck-name)))
 
 (defn find-all-chuncks-filename
   "查找并获取所有chuncks的文件名"
   [webpack-root]
-  (let [chuncks (find-chuncks webpack-root)]
-    (map (comp #(get-chunck-filename %1 chuncks) first)
-         chuncks)))
+  (->> (find-chuncks webpack-root)
+       (map #(str %1 ".js.map"))))
 
 ;;;;;;;;;; script functions
 (extender/defsetting :webpack/save-dir (str (fs/tmpdir)))
@@ -300,6 +350,14 @@
     (jsmap-error-handler)
     (start-jsmap-service)))
 
+(defn have-webpack?
+  [req-resp]
+  (let [path (-> (.getUrl req-resp)
+                 (.getFile))]
+    (or (re-find #"[a-f\d]{8}\.js" path)
+        (-> (.getResponse req-resp)
+            (utils/->string)
+            (str/ends-with? ".js.map")))))
 
 (defn jsmap-scan
   [req-resp]
@@ -310,9 +368,7 @@
         file-name (str (get-file-name path)
                        ".map")]
     (when (and (str/includes? path ".js")
-               (-> (.getResponse req-resp)
-                   (utils/->string)
-                   (str/ends-with? ".js.map"))
+               (have-webpack? req-resp)
                (not (jsmap-exists?
                      (:host service)
                      file-name)))
