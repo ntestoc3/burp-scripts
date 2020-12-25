@@ -1,0 +1,44 @@
+(require '[clj-http.client :as client])
+(require '[clj-http.cookies :as cookies])
+(import org.apache.http.impl.cookie.BasicClientCookie2)
+
+(defn new-cookie
+  [name value domain]
+  (let [c (cookies/to-basic-client-cookie
+           [name
+            {:discard false
+             :domain domain
+             :path "/"
+             :secure false,
+             :expires nil
+             :value value}])]
+    (.setAttribute c BasicClientCookie2/DOMAIN_ATTR "true")
+    c))
+
+(def my-cs (clj-http.cookies/cookie-store))
+
+(def common-opts {:proxy-host nil
+                  :proxy-port nil
+                  :insecure? true
+                  :cookie-policy :standard
+                  :throw-exceptions false})
+
+{{#items}}
+
+{{#cookies}}
+(cookies/add-cookie my-cs (new-cookie "{{k}}" "{{v}}" "{{domain}}"))
+{{/cookies}}
+(def burp-{{id}}
+  (client/request
+   (merge
+    common-opts
+    {:method {{method}}
+     :url "{{url}}"
+     :headers {
+               {{#headers}}
+               {{k}} "{{v}}"
+               {{/headers}}
+               }
+     :body "{{{body}}}"
+     :cookie-store my-cs})))
+{{/items}}
