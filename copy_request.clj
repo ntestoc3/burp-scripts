@@ -137,8 +137,8 @@
                         :tag-close \]})
         clip/contents!)))
 
-(def clj-code-template (slurp (io/resource "copy_request_clj.tmp")))
-(def py-code-template (slurp (io/resource "copy_request_py.tmp")))
+(def clj-code-template (slurp (io/resource "copy_request_clj.tpl")))
+(def py-code-template (slurp (io/resource "copy_request_py.tpl")))
 
 (defn copy-request-menu []
   (context-menu/make-context-menu
