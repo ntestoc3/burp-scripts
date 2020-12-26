@@ -372,8 +372,9 @@ exploit type: <b>%2</b><br>"
             "wrap, grow, wmin 200"]]))
 
 
-(def test-view (atom nil))
 (comment
+  (def test-view (atom nil))
+
   (def tbl (gui/select @test-view [:#http-message-table]))
 
   )
@@ -401,7 +402,7 @@ exploit type: <b>%2</b><br>"
                                              {:title (tr :collaborator-viewer-title)
                                               :content collaborator-viewer}])
           win (utils/show-ui main-view {:title (tr :script-name)})]
-      (reset! test-view main-view)
+      ;; (reset! test-view main-view)
       (future
         (let [pool (thread-pool/threadpool (get-threads-num)
                                            :name "host-check request pool")]
@@ -422,7 +423,7 @@ exploit type: <b>%2</b><br>"
                     (->> (assoc info :index index)
                          (make-req msg-table)))))
                (catch Exception e
-                 (log/error "host-check run request engine.")))
+                 (log/error "host-check run request engine." e)))
           (log/info "host-check over!")
           (when-not (thread-pool/shutdown? pool)
             (gui/alert (tr :scan-over))))))))
