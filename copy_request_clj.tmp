@@ -1,3 +1,4 @@
+[% if common-code %]
 (require '[clj-http.client :as client])
 (require '[clj-http.cookies :as cookies])
 (import org.apache.http.impl.cookie.BasicClientCookie2)
@@ -22,8 +23,9 @@
                   :insecure? true
                   :cookie-policy :standard
                   :throw-exceptions false})
-[% safe %][% for info in items %]
-[% for c in info.cookies %]
+[% endif %]
+[% safe %]
+[% for info in items %][% for c in info.cookies %]
 (cookies/add-cookie my-cs (new-cookie "[{c.k}]" "[{c.v}]" "[{c.domain}]"))[% endfor %]
 (def burp-[{forloop.counter}]
   (client/request
@@ -32,13 +34,14 @@
     {:method [{info.method}]
      :url "[{info.url}]"
      :headers {[% for hdr in info.headers %][{hdr.k}] "[{hdr.v}]"
-               [% endfor %]}[% if info.body|not-empty %]
-     [% if info.content-type = "application/json" %]
+               [% endfor %]}
+     [% if info.body|not-empty %][% if info.content-type = "application/json" %]
      :content-type :json
      :form-params [{info.body}]
      [% elif info.content-type = "application/x-www-form-urlencoded" %]
      :form-params [{info.body}]
      [% else %]
-     :body (byte-array [{info.body}])[% endif %] [% endif %]
+     :body (byte-array [{info.body}])
+     [% endif %][% endif %]
      :cookie-store my-cs})))[% endfor %]
 [% endsafe %]

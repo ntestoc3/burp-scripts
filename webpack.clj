@@ -270,9 +270,11 @@
     (if (fs/exists? local-file-path)
       (log/info :save-unpack-jsmap local-file-path "already exists!")
       (when-let [req-resp (fetch-json-file service new-req-info)]
-        (let [data (-> (.getResponse req-resp)
-                       (http-message/parse-response)
-                       :body)]
+        (let [data (let [r (-> (.getResponse req-resp)
+                               (http-message/parse-response))]
+                     (utils/->string (:body r)
+                                     (or (:charset r)
+                                         "UTF-8")))]
           (log/info :save-unpack-jsmap "save to" local-file-path)
           (fs/mkdirs jsmap-dir)
           (fs/mkdirs webpack-dir)

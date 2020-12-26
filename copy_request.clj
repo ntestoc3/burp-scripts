@@ -111,7 +111,7 @@
                                   (-> (format-req msg opts)
                                       (assoc :id idx)))))]
     (-> (render/render template
-                       {:items items}
+                       (assoc opts :items items)
                        {:tag-open \[
                         :tag-close \]})
         clip/contents!)))
@@ -122,21 +122,41 @@
   (context-menu/make-context-menu
    menu-context
    (fn [invocation]
-     [(gui/menu-item :text "test")
-      (gui/menu :text (tr :menu-gen)
+     [(gui/menu :text (tr :menu-gen)
                 :items [(gui/menu-item
                          :text "Clojure"
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
                                          (gen-code-to-clip clj-code-template
-                                                           {:use-cookie true})))])
+                                                           {:use-cookie true
+                                                            :common-code true})))])
                         (gui/menu-item
                          :text "Clojure(no cookie)"
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
-                                         (gen-code-to-clip clj-code-template nil)))])])])))
+                                         (gen-code-to-clip clj-code-template
+                                                           {:use-cookie false
+                                                            :common-code true})))])
+                        (gui/menu-item
+                         :text "Clojure(no common code)"
+                         :listen [:action
+                                  (fn [e]
+                                    (->> (context-menu/get-selected-messge invocation)
+                                         (gen-code-to-clip clj-code-template
+                                                           {:use-cookie true
+                                                            :common-code false})))])
+                        (gui/menu-item
+                         :text "Clojure(no common code, no cookie)"
+                         :listen [:action
+                                  (fn [e]
+                                    (->> (context-menu/get-selected-messge invocation)
+                                         (gen-code-to-clip clj-code-template
+                                                           {:use-cookie false
+                                                            :common-code false})))])
+
+                        ])])))
 
 (def reg (scripts/reg-script! :copy-request
                               {:name (tr :script-name)
