@@ -41,7 +41,7 @@
      [% elif info.content-type = "application/x-www-form-urlencoded" %]
      :form-params [{info.body}]
      [% else %]
-     :body (byte-array [{info.body}])
+     :body (byte-array [{info.body|vec}])
      [% endif %][% endif %]
      :cookie-store my-cs})))[% endfor %]
 [% endsafe %]

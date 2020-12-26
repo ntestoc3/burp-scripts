@@ -21,6 +21,10 @@
         :menu-clj-no-cookie "Clojure(no cookie)"
         :menu-clj-no-common "Clojure(no common code)"
         :menu-clj-no-common-no-cookie "Clojure(no common code, no cookie)"
+        :menu-py "Python"
+        :menu-py-no-cookie "Python(no cookie)"
+        :menu-py-no-common "Python(no common code)"
+        :menu-py-no-common-no-cookie "Python(no common code, no cookie)"
         }
 
    :zh {:script-name "生成请求代码"
@@ -29,6 +33,10 @@
         :menu-clj-no-cookie "Clojure(不含cookie)"
         :menu-clj-no-common "Clojure(不含公共代码)"
         :menu-clj-no-common-no-cookie "Clojure(不含公共代码和cookie)"
+        :menu-py "Python"
+        :menu-py-no-cookie "Python(不含cookie)"
+        :menu-py-no-common "Python(不含公共代码)"
+        :menu-py-no-common-no-cookie "Python(不含公共代码和cookie)"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -41,10 +49,8 @@
                     :search-results
                     :intruder-attack-results})
 
-(helper/add-dep-with-proxy '[[selmer "1.12.31"]
-                             [org.apache.commons/commons-text "1.9"]])
+(helper/add-dep-with-proxy '[[selmer "1.12.31"]])
 (require '[selmer.parser :as render])
-(import org.apache.commons.text.StringEscapeUtils)
 
 (def common-escape-map {\newline "\\n"
                         \return "\\r"
@@ -63,12 +69,18 @@
       (aset box (int k) v))
     box))
 
-(defn byte->escaped-str
+(defn bytes->escaped-str
   [bs]
-  (->> bs
-       (map #(->> (bit-and 0xFF %1)
-                  (aget trans-box)))
-       (apply str)))
+  (log/info :bytes->escaped-str (count bs))
+  (try (->> bs
+            (map #(->> (bit-and 0xFF %1)
+                       (aget trans-box)))
+            (apply str))
+       (catch Exception e
+         (log/error :bytes->escaped-str e))))
+
+(selmer.filters/add-filter! :escaped-str bytes->escaped-str)
+(selmer.filters/add-filter! :vec vec)
 
 (def global-index (atom 0))
 
@@ -93,6 +105,7 @@
                                       :domain (.getHost service)})))))
      :id (swap! global-index inc)
      :url (str host url)
+     :charset charset
      :method method
      :content-type content-type
      :body (when-not (empty? body)
@@ -105,7 +118,7 @@
                (-> (utils/->string body charset)
                    (json/decode keyword))
 
-               (vec body)))
+               body))
      :headers (->> (dissoc headers
                            :content-length
                            :cookie
@@ -115,6 +128,7 @@
 
 (defn gen-code-to-clip
   [template opts msgs]
+  (utils/add-dep [])
   (let [items (->> msgs
                    (map #(format-req %1 opts)))]
     (-> (render/render template
@@ -124,46 +138,54 @@
         clip/contents!)))
 
 (def clj-code-template (slurp (io/resource "copy_request_clj.tmp")))
+(def py-code-template (slurp (io/resource "copy_request_py.tmp")))
 
 (defn copy-request-menu []
   (context-menu/make-context-menu
    menu-context
    (fn [invocation]
-     [(gui/menu :text (tr :menu-gen)
-                :items [(gui/menu-item
-                         :text (tr :menu-clj)
-                         :listen [:action
-                                  (fn [e]
-                                    (->> (context-menu/get-selected-messge invocation)
-                                         (gen-code-to-clip clj-code-template
-                                                           {:use-cookie true
-                                                            :common-code true})))])
-                        (gui/menu-item
-                         :text (tr :menu-clj-no-cookie)
-                         :listen [:action
-                                  (fn [e]
-                                    (->> (context-menu/get-selected-messge invocation)
-                                         (gen-code-to-clip clj-code-template
-                                                           {:use-cookie false
-                                                            :common-code true})))])
-                        (gui/menu-item
-                         :text (tr :menu-clj-no-common)
-                         :listen [:action
-                                  (fn [e]
-                                    (->> (context-menu/get-selected-messge invocation)
-                                         (gen-code-to-clip clj-code-template
-                                                           {:use-cookie true
-                                                            :common-code false})))])
-                        (gui/menu-item
-                         :text (tr :menu-clj-no-common-no-cookie)
-                         :listen [:action
-                                  (fn [e]
-                                    (->> (context-menu/get-selected-messge invocation)
-                                         (gen-code-to-clip clj-code-template
-                                                           {:use-cookie false
-                                                            :common-code false})))])
-
-                        ])])))
+     (let [gen-code-menu-item (fn [tr-key code-template opts]
+                                (gui/menu-item
+                                 :text (tr tr-key)
+                                 :listen [:action
+                                          (fn [e]
+                                            (->> (context-menu/get-selected-messge invocation)
+                                                 (gen-code-to-clip code-template
+                                                                   opts)))]))]
+       [(gui/menu :text (tr :menu-gen)
+                  :items [(gen-code-menu-item :menu-clj
+                                              clj-code-template
+                                              {:use-cookie true
+                                               :common-code true})
+                          (gen-code-menu-item :menu-clj-no-cookie
+                                              clj-code-template
+                                              {:use-cookie false
+                                               :common-code true})
+                          (gen-code-menu-item :menu-clj-no-common
+                                              clj-code-template
+                                              {:use-cookie true
+                                               :common-code false})
+                          (gen-code-menu-item :menu-clj-no-common-no-cookie
+                                              clj-code-template
+                                              {:use-cookie false
+                                               :common-code false})
+                          (gui/separator)
+                          (gen-code-menu-item :menu-py
+                                              py-code-template
+                                              {:use-cookie true
+                                               :common-code true})
+                          (gen-code-menu-item :menu-py-no-cookie
+                                              py-code-template
+                                              {:use-cookie false
+                                               :common-code true})
+                          (gen-code-menu-item :menu-py-no-common
+                                              py-code-template
+                                              {:use-cookie true
+                                               :common-code false})
+                          (gen-code-menu-item :menu-py-no-common-no-cookie
+                                              py-code-template
+                                              {:use-cookie false
+                                               :common-code false})])]))))
 
 (def reg (scripts/reg-script! :copy-request
                               {:name (tr :script-name)
