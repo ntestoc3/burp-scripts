@@ -47,3 +47,5 @@ comment中添加ip地址显示
 ## save response
   保存选中项的response body到指定目录，保持网站目录结构
 
+## copy request 
+  复制选中的请求为代码，方便快速写脚本，支持clojure,python
