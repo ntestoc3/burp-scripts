@@ -32,6 +32,6 @@ burp[{info.id}]_json =[{info.body|json}]
 [% elif info.content-type = "application/x-www-form-urlencoded" %]
 burp[{info.id}]_data = [{info.body|json}]
 [% else %]
-burp[{info.id}]_data =b"[{info.body|escaped-str}]"[% endif %][% endif %]
+burp[{info.id}]_data = "[{info.body}]"[% endif %][% endif %]
 burp[{info.id}] = http.request("[{info.method|name|upper}]", brup[{info.id}]_url, headers=burp[{info.id}]_headers, [% if info.body|not-empty %][% if info.content-type = "application/json" %]json=burp[{info.id}]_json, [% else %]data=burp[{info.id}]_data, [% endif %][% endif %][% if info.cookies|not-empty %]cookies=burp[{info.id}]_cookies, [% endif %]**common_http_args)
 [% endfor %][% endsafe %]

@@ -18,11 +18,15 @@
 
 (def my-cs (clj-http.cookies/cookie-store))
 
-(def common-opts {:proxy-host nil
-                  :proxy-port nil
-                  :insecure? true
-                  :cookie-policy :standard
-                  :throw-exceptions false})
+(def my-proxy {:proxy-host "localhost"
+               :proxy-port 8080})
+(def use-proxy false)
+
+(def common-opts (merge {:insecure? true
+                         :cookie-policy :standard
+                         :throw-exceptions false}
+                        (when use-proxy
+                          my-proxy)))
 [% endif %]
 [% safe %]
 [% for info in items %][% for c in info.cookies %]
@@ -41,7 +45,8 @@
      [% elif info.content-type = "application/x-www-form-urlencoded" %]
      :form-params [{info.body}]
      [% else %]
-     :body (byte-array [{info.body|vec}])
+     :body (-> "[{info.body}]"
+               (.getBytes "ISO-8859-1"))
      [% endif %][% endif %]
      :cookie-store my-cs})))[% endfor %]
 [% endsafe %]

@@ -71,16 +71,12 @@
 
 (defn bytes->escaped-str
   [bs]
-  (log/info :bytes->escaped-str (count bs))
   (try (->> bs
             (map #(->> (bit-and 0xFF %1)
                        (aget trans-box)))
             (apply str))
        (catch Exception e
          (log/error :bytes->escaped-str e))))
-
-(selmer.filters/add-filter! :escaped-str bytes->escaped-str)
-(selmer.filters/add-filter! :vec vec)
 
 (def global-index (atom 0))
 
@@ -118,7 +114,7 @@
                (-> (utils/->string body charset)
                    (json/decode keyword))
 
-               body))
+               (bytes->escaped-str body)))
      :headers (->> (dissoc headers
                            :content-length
                            :cookie
