@@ -27,7 +27,7 @@
 [% safe %]
 [% for info in items %][% for c in info.cookies %]
 (cookies/add-cookie my-cs (new-cookie "[{c.k}]" "[{c.v}]" "[{c.domain}]"))[% endfor %]
-(def burp-[{forloop.counter}]
+(def burp-[{info.id}]
   (client/request
    (merge
     common-opts

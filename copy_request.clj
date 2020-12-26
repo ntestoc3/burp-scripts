@@ -17,10 +17,18 @@
 (def translations
   {:en {:missing       "**MISSING**"    ; Fallback for missing resources
         :script-name "Copy as Code"
+        :menu-clj "Clojure"
+        :menu-clj-no-cookie "Clojure(no cookie)"
+        :menu-clj-no-common "Clojure(no common code)"
+        :menu-clj-no-common-no-cookie "Clojure(no common code, no cookie)"
         }
 
    :zh {:script-name "生成请求代码"
         :menu-gen "生成请求代码"
+        :menu-clj "Clojure"
+        :menu-clj-no-cookie "Clojure(不含cookie)"
+        :menu-clj-no-common "Clojure(不含公共代码)"
+        :menu-clj-no-common-no-cookie "Clojure(不含公共代码和cookie)"
         }})
 
 (def tr (partial i18n/app-tr translations))
@@ -62,10 +70,10 @@
                   (aget trans-box)))
        (apply str)))
 
-(def last-req (atom nil))
+(def global-index (atom 0))
+
 (defn format-req
   [req-resp {:keys [use-cookie]}]
-  (reset! last-req req-resp)
   (let [{:keys [method
                 body
                 headers
@@ -83,6 +91,7 @@
                                      {:k (str/trim k)
                                       :v (str/trim v)
                                       :domain (.getHost service)})))))
+     :id (swap! global-index inc)
      :url (str host url)
      :method method
      :content-type content-type
@@ -107,9 +116,7 @@
 (defn gen-code-to-clip
   [template opts msgs]
   (let [items (->> msgs
-                   (map-indexed (fn [idx msg]
-                                  (-> (format-req msg opts)
-                                      (assoc :id idx)))))]
+                   (map #(format-req %1 opts)))]
     (-> (render/render template
                        (assoc opts :items items)
                        {:tag-open \[
@@ -124,7 +131,7 @@
    (fn [invocation]
      [(gui/menu :text (tr :menu-gen)
                 :items [(gui/menu-item
-                         :text "Clojure"
+                         :text (tr :menu-clj)
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
@@ -132,7 +139,7 @@
                                                            {:use-cookie true
                                                             :common-code true})))])
                         (gui/menu-item
-                         :text "Clojure(no cookie)"
+                         :text (tr :menu-clj-no-cookie)
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
@@ -140,7 +147,7 @@
                                                            {:use-cookie false
                                                             :common-code true})))])
                         (gui/menu-item
-                         :text "Clojure(no common code)"
+                         :text (tr :menu-clj-no-common)
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
@@ -148,7 +155,7 @@
                                                            {:use-cookie true
                                                             :common-code false})))])
                         (gui/menu-item
-                         :text "Clojure(no common code, no cookie)"
+                         :text (tr :menu-clj-no-common-no-cookie)
                          :listen [:action
                                   (fn [e]
                                     (->> (context-menu/get-selected-messge invocation)
