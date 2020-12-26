@@ -3,6 +3,7 @@
             [burp-clj.extender :as extender]
             [burp-clj.context-menu :as context-menu]
             [burp-clj.scripts :as scripts]
+            [burp-clj.http-message :as http-message]
             [burp-clj.helper :as helper]
             [burp-clj.ui :as bui]
             [cheshire.core :as json]
@@ -86,12 +87,13 @@
                                 (log/warn :fetch-json-file url "error:" ex "retry..."))
                     :max-retries 3}
       (log/info :fetch-json-file url)
-      (let [req-resp (-> (utils/build-request-raw req-info)
+      (let [req-resp (-> (http-message/build-request-raw req-info)
                          (helper/send-http-raw service))
             resp-info (-> (.getResponse req-resp)
-                          utils/parse-response)]
+                          http-message/parse-response)]
         (when (= 200 (:status resp-info))
-          (let [data (:body resp-info)]
+          (let [data (-> (:body resp-info)
+                         (utils/->string ))]
             (try
               (json/decode data)
               req-resp
@@ -269,7 +271,7 @@
       (log/info :save-unpack-jsmap local-file-path "already exists!")
       (when-let [req-resp (fetch-json-file service new-req-info)]
         (let [data (-> (.getResponse req-resp)
-                       (utils/parse-response)
+                       (http-message/parse-response)
                        :body)]
           (log/info :save-unpack-jsmap "save to" local-file-path)
           (fs/mkdirs jsmap-dir)
@@ -302,7 +304,7 @@
           (try
             (log/info :jsmap-service "recv" x)
             (let [{:keys [service req-resp file-name]} x
-                  req-info (utils/parse-request (.getRequest req-resp))
+                  req-info (http-message/parse-request (.getRequest req-resp))
                   ok-req-resp (-> (async/thread
                                     (save-unpack-jsmap service req-info file-name))
                                   async/<!)]
@@ -427,7 +429,7 @@
 (def reg (scripts/reg-script! :webpack
                               {:name (tr :script-name)
                                :version "0.1.0"
-                               :min-burp-clj-version "0.4.14"
+                               :min-burp-clj-version "0.5.0"
                                :scanner-check {:webpack/jsmap-scan (jsmap-issue-check)}
                                :tab {:webpack/setting
                                      {:captain (tr :webpack-setting)

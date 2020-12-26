@@ -1,5 +1,5 @@
 (ns add-csrf
-  "自动添加csrf　token,还不完善，需要针对不同的目标进行修"
+  "自动添加csrf token,还不完善，需要针对不同的目标进行修正"
   (:require [clojure.string :as str]
             [taoensso.timbre :as log]
             [seesaw.swingx :as guix]
@@ -13,6 +13,7 @@
             [burp-clj.utils :as utils]
             [burp-clj.helper :as helper]
             [burp-clj.extender :as extender]
+            [burp-clj.http-message :as http-message]
             [burp-clj.ui :as ui]
             [burp-clj.http :refer [make-http-proc]]
             [burp-clj.context-menu :as context-menu]
@@ -31,8 +32,8 @@
 
 (defn parse-target [req-resp]
   (let [req (-> (.getRequest req-resp)
-                (utils/parse-request {:key-fn identity
-                                      :val-fn identity}))
+                (http-message/parse-request {:key-fn identity
+                                             :val-fn identity}))
         service (-> (.getHttpService req-resp)
                     (helper/parse-http-service))]
     (merge req service)))
@@ -48,17 +49,16 @@
       (log/info "start csrf-token request.")
       (let [csrf-token (-> (assoc csrf-target :headers (:headers target))
                            ;; 使用当前请求的headers进行替换
-                           (utils/build-request-raw {:key-fn identity
-                                                     :val-fn identity})
+                           (http-message/build-request-raw {:key-fn identity
+                                                            :val-fn identity})
                            (helper/send-http-raw2 target)
                            utils/->string
                            (extract-csrf-token))]
         (if csrf-token
           (do (log/info :set-csrf-token "url:" (:url target) "csrf token:" csrf-token)
-              (-> (update target :headers utils/assoc-header "X-CSRF-Token" csrf-token)
-                  (utils/build-request-raw {:key-fn identity
-                                            :val-fn identity})
-                  (.getBytes)
+              (-> (update target :headers http-message/assoc-header "X-CSRF-Token" csrf-token)
+                  (http-message/build-request-raw {:key-fn identity
+                                                   :val-fn identity})
                   (->> (.setRequest curr-req))))
           (log/warn :set-csrf-token "not found csrf token for:" (:url target)))))))
 
@@ -100,7 +100,7 @@
 (def reg (scripts/reg-script! :add-csrf
                               {:name "add csrf header from body"
                                :version "0.2.0"
-                               :min-burp-clj-version "0.4.5"
+                               :min-burp-clj-version "0.5.0"
                                :http-listener {:add-csrf/http-listener
                                                (make-http-proc add-csrf-proc)}
                                :context-menu {:add-csrf/context-menu (set-url-menu)}

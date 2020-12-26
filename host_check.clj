@@ -8,6 +8,7 @@
             [burp-clj.helper :as helper]
             [burp-clj.collaborator :as collaborator]
             [burp-clj.table-util :as table-util]
+            [burp-clj.http-message :as http-message]
             [com.climate.claypoole :as thread-pool]
             [diehard.core :as dh]
             [seesaw.core :as gui]
@@ -152,7 +153,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "bad port"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/update-header
+                                        (http-message/update-header
                                          hdrs
                                          :host #(str %1 ":" (:payload-host exp))
                                          {:keep-old-key true}))]]})
@@ -160,7 +161,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "pre bad"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/update-header
+                                        (http-message/update-header
                                          hdrs
                                          :host #(str (:payload-host exp) "." %1)
                                          {:keep-old-key true}))]]})
@@ -168,7 +169,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "post bad"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/update-header
+                                        (http-message/update-header
                                          hdrs
                                          :host #(str %1 "." (:payload-host exp))
                                          {:keep-old-key true}))]]})
@@ -176,7 +177,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "localhost"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/assoc-header
+                                        (http-message/assoc-header
                                          hdrs
                                          :host "localhost"
                                          {:keep-old-key true}))]]})
@@ -184,7 +185,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "bad host"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/assoc-header
+                                        (http-message/assoc-header
                                          hdrs
                                          :host (:payload-host exp)
                                          {:keep-old-key true}))]]})
@@ -194,7 +195,7 @@ exploit type: <b>%2</b><br>"
                   :updates [[:url (fn [exp u]
                                     (str (helper/get-full-host service) u))]
                             [:headers (fn [exp hdrs]
-                                        (utils/assoc-header
+                                        (http-message/assoc-header
                                          hdrs
                                          :host (:payload-host exp)
                                          {:keep-old-key true}))]]})
@@ -207,14 +208,14 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "multi host"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/insert-headers
+                                        (http-message/insert-headers
                                          hdrs
                                          [["Host" (:payload-host exp)]]))]]})
    (gen-exp-info info
                  {:exp-name "host line wrapping"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/insert-headers
+                                        (http-message/insert-headers
                                          hdrs
                                          [[" Host" (:payload-host exp)]]
                                          :host
@@ -223,7 +224,7 @@ exploit type: <b>%2</b><br>"
                  {:exp-name "other host headers"
                   :bc bc
                   :updates [[:headers (fn [exp hdrs]
-                                        (utils/insert-headers
+                                        (http-message/insert-headers
                                          hdrs
                                          (let [bad-host (:payload-host exp)]
                                            [["X-Forwarded-Host" bad-host]
@@ -242,7 +243,7 @@ exploit type: <b>%2</b><br>"
   ([{:keys [service] :as req-info} opts]
    (merge
     (helper/parse-http-service service)
-    (helper/flatten-format-req-resp (:request/raw req-info) :request)
+    (http-message/flatten-format-req-resp (:request/raw req-info) :request)
     (dissoc req-info :service)
     {:full-host (helper/get-full-host service)}
     opts)))
@@ -286,7 +287,7 @@ exploit type: <b>%2</b><br>"
                                      (helper/send-http-raw (:request/raw r) (:service r))))
 
             result (merge
-                    (helper/parse-http-req-resp return)
+                    (http-message/parse-http-req-resp return)
                     (dissoc r :request/raw :service)
                     {:rtt time
                      :result (tr :request-over)
@@ -299,14 +300,14 @@ exploit type: <b>%2</b><br>"
 (defn get-req-exp-service
   [req-resp bc]
   (let [req (-> (.getRequest req-resp)
-                (utils/parse-request {:key-fn identity}))
+                (http-message/parse-request {:key-fn identity}))
         service (.getHttpService req-resp)]
     (->> (build-exps req service bc)
          (map (fn [data]
                 {:service service
                  :exp-name (:exp-name data)
                  :payload-id (:payload-id data)
-                 :request/raw (utils/build-request-raw data {:key-fn identity})})))))
+                 :request/raw (http-message/build-request-raw data {:key-fn identity})})))))
 
 (defn update-table-found-payload
   "发现SSRF时进行数据更新"
@@ -386,7 +387,7 @@ exploit type: <b>%2</b><br>"
           msg-viewer (message-viewer/http-message-viewer
                       {:columns     cols-info
                        :ac-words    (-> (first msgs)
-                                        helper/parse-http-req-resp
+                                        http-message/parse-http-req-resp
                                         keys)
                        :ken-fn :index
                        :setting-key :host-check/intruder})
@@ -445,7 +446,7 @@ exploit type: <b>%2</b><br>"
 (def reg (scripts/reg-script! :host-check
                               {:name (tr :script-name)
                                :version "0.2.5"
-                               :min-burp-clj-version "0.4.13"
+                               :min-burp-clj-version "0.5.0"
                                :context-menu {:host-check (host-check-menu)}}))
 
 
@@ -453,19 +454,19 @@ exploit type: <b>%2</b><br>"
   (def d1 (first (extender/get-proxy-history)))
 
   (def req (-> (.getRequest d1)
-               (utils/parse-request {:key-fn identity})))
+               (http-message/parse-request {:key-fn identity})))
 
   (def req2 (update req :headers
-                    utils/insert-headers
+                    http-message/insert-headers
                     [["Host" "www.bing.com"]
                      ["Content-length" "1228"]]
                     :host
                     {:insert-before true}))
 
-  (def d2 (utils/build-request-raw (assoc req2
-                                          :body "test body")
-                                   {:key-fn identity
-                                    :fix-content-length false}))
+  (def d2 (http-message/build-request-raw (assoc req2
+                                                 :body (utils/->bytes "test body"))
+                                          {:key-fn identity
+                                           :fix-content-length false}))
 
   (def dr1 (helper/send-http-raw2 d2
                                   {:host "127.0.0.1"
@@ -477,7 +478,7 @@ exploit type: <b>%2</b><br>"
   (def hs [dr1])
 
   (def datas (map-indexed (fn [idx v]
-                            (let [info (helper/parse-http-req-resp v)]
+                            (let [info (http-message/parse-http-req-resp v)]
                               (assoc info :index idx))) hs))
 
   (utils/show-ui (message-viewer/http-message-viewer

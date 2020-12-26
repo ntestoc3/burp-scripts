@@ -5,6 +5,7 @@
             [burp-clj.context-menu :as context-menu]
             [burp-clj.extender :as extender]
             [burp-clj.scripts :as scripts]
+            [burp-clj.http-message :as http-message]
             [burp-clj.helper :as helper]
             [me.raynes.fs :as fs]
             [seesaw.mig :refer [mig-panel]]
@@ -75,7 +76,7 @@
   [base-dir messages]
   (doseq [req-resp messages]
     (try
-      (let [info (helper/parse-http-req-resp req-resp)
+      (let [info (http-message/parse-http-req-resp req-resp)
             path (-> (:request/url info)
                      (str/replace #"\?.*$" ""))
             save-path (fs/file base-dir
@@ -84,7 +85,9 @@
           (when-not (fs/exists? save-path)
             (log/info :save-all "save:" save-path)
             (fs/mkdirs (fs/parent save-path))
-            (spit save-path (:response/body info)))))
+            (-> (:response/body info)
+                (utils/->string "UTF-8")
+                (->> (spit save-path))))))
       (catch Exception e
         (log/error :save-all "error:" e "url:" (.getUrl req-resp)))))
   (when (= :open-dir (show-ok-dlg))
@@ -105,5 +108,5 @@
 (def reg (scripts/reg-script! :save-response
                               {:name (tr :script-name)
                                :version "0.0.1"
-                               :min-burp-clj-version "0.4.14"
+                               :min-burp-clj-version "0.5.0"
                                :context-menu {:save-response (save-response-menu)}}))

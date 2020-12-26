@@ -4,6 +4,7 @@
             [burp-clj.state :as state]
             [burp-clj.utils :as utils]
             [burp-clj.validate :as validate]
+            [burp-clj.http-message :as http-message]
             [burp-clj.helper :as helper]
             [burp-clj.issue :as issue]
             [burp-clj.i18n :as i18n]
@@ -136,8 +137,9 @@
                helper/parse-mime-type
                str/lower-case))
     (->> (.getResponse req-resp)
-         utils/parse-response
+         http-message/parse-response
          :body
+         utils/->string
          parse-links)))
 
 (defn passive-scan
@@ -311,7 +313,7 @@
 (def reg (scripts/reg-script! :jslink
                               {:name (tr :script-name)
                                :version "0.1.2"
-                               :min-burp-clj-version "0.4.11"
+                               :min-burp-clj-version "0.5.0"
                                :context-menu {:jslink/context-menu (jslink-menu)}
                                :scanner-check {:jslink/jslink-scan (jslink-issue-check)}
                                :tab {:jslink/result-tab
