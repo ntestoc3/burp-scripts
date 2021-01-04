@@ -35,7 +35,7 @@
 (def burp[{info.id}]-url "[{info.url}]")
 (def burp[{info.id}]-headers {[% for hdr in info.headers %][{hdr.k}] "[{hdr.v}]"
                     [% endfor %]})
-(def burp-[{info.id}]
+(def burp[{info.id}]
   (client/request
    (merge
     common-opts
