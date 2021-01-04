@@ -107,8 +107,8 @@
      :body (when-not (empty? body)
              (case content-type
                "application/x-www-form-urlencoded"
-               (->> (utils/->string body charset)
-                    (http-message/decode-params))
+               (-> (utils/->string body charset)
+                   (http-message/decode-params {:key-fn keyword}))
 
                "application/json"
                (-> (utils/->string body charset)

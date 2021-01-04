@@ -29,24 +29,25 @@
                           my-proxy)))
 [% endif %]
 [% safe %]
-[% for info in items %][% for c in info.cookies %]
+[% for info in items %]
+[% for c in info.cookies %]
 (cookies/add-cookie my-cs (new-cookie "[{c.k}]" "[{c.v}]" "[{c.domain}]"))[% endfor %]
+(def burp[{info.id}]-url "[{info.url}]")
+(def burp[{info.id}]-headers {[% for hdr in info.headers %][{hdr.k}] "[{hdr.v}]"
+                    [% endfor %]})
 (def burp-[{info.id}]
   (client/request
    (merge
     common-opts
     {:method [{info.method}]
-     :url "[{info.url}]"
-     :headers {[% for hdr in info.headers %][{hdr.k}] "[{hdr.v}]"
-               [% endfor %]}
-     [% if info.body|not-empty %][% if info.content-type = "application/json" %]
+     :url burp[{info.id}]-url
+     :headers burp[{info.id}]-headers[% if info.body|not-empty %][% if info.content-type = "application/json" %]
      :content-type :json
-     :form-params [{info.body}]
-     [% elif info.content-type = "application/x-www-form-urlencoded" %]
-     :form-params [{info.body}]
-     [% else %]
+     :form-params [{info.body}][% elif info.content-type = "application/x-www-form-urlencoded" %]
+     :form-params [{info.body}][% else %]
      :body (-> "[{info.body}]"
                (.getBytes "ISO-8859-1"))
      [% endif %][% endif %]
-     :cookie-store my-cs})))[% endfor %]
+     :cookie-store my-cs})))
+[% endfor %]
 [% endsafe %]
