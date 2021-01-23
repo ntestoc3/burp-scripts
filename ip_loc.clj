@@ -7,7 +7,8 @@
             [burp-clj.helper :as helper]
             [burp-clj.i18n :as i18n]
             [clojure.java.io :as io])
-  (:import java.net.InetAddress))
+  (:import java.net.InetAddress
+           com.github.jarod.qqwry.QQWry))
 
 ;;;;;; i18n
 (def translations
@@ -21,9 +22,7 @@
 (def tr (partial i18n/app-tr translations))
 
 ;;;;;;;;;;
-(helper/add-dep-with-proxy '[[com.github.jarod/qqwry-java "0.8.0"]
-                             [org.clojure/core.memoize "1.0.236"]])
-(import 'com.github.jarod.qqwry.QQWry)
+(helper/add-dep-with-proxy '[[org.clojure/core.memoize "1.0.236"]])
 (require '[clojure.core.memoize :as memo])
 
 (defn file->bytes [file]
@@ -70,7 +69,7 @@
 
 (def reg (scripts/reg-script! :ip-location
                               {:name (tr :script-name)
-                               :version "0.2.0"
-                               :min-burp-clj-version "0.4.11"
+                               :version "0.2.1"
+                               :min-burp-clj-version "0.5.0"
                                :proxy-listener {:ip-loc/comment-loc (ip-loc-proxy)}
                                }))
