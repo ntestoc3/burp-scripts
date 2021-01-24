@@ -62,11 +62,6 @@
       (str/split #"\?")
       first))
 
-(defn get-file-parent
-  "获取parent路径"
-  [path]
-  (str (fs/parent path)))
-
 ;;;;;; jsmap functions
 
 (defn fetch-json-file
@@ -252,6 +247,14 @@
                jsmap-path)
       (fs/exists?)))
 
+(defn trim-file
+  "删除路径最后的文件名"
+  [s]
+  (or (-> s
+          (str/split #"[^/]*$")
+          first)
+      "/"))
+
 (defn save-unpack-jsmap
   "请求jsmap文件，并解压保存
 
@@ -259,7 +262,7 @@
   [service req-info file-name]
   (let [new-req-info (update req-info
                              :url
-                             #(str (get-file-parent %1) "/" file-name))
+                             #(str (trim-file %1) file-name))
         jsmap-dir (fs/file (get-save-dir)
                            (:host service)
                            (get-jsmap-root))
