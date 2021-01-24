@@ -406,7 +406,11 @@
 
            [(gui/button :text (tr :open-dir)
                         :listen [:action (fn [_]
-                                           (browse-url (get-save-dir)))])]
+                                           (-> (get-save-dir)
+                                               fs/file
+                                               (.toURI)
+                                               str
+                                               browse-url))])]
            [(bui/choose-dir-btn (get-save-dir) [:#save-dir-txt])
             "wrap"]
 

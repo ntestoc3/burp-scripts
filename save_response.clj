@@ -91,7 +91,10 @@
       (catch Exception e
         (log/error :save-all "error:" e "url:" (.getUrl req-resp)))))
   (when (= :open-dir (show-ok-dlg))
-    (browse-url base-dir)))
+    (-> (fs/file base-dir)
+        (.toURI)
+        str
+        browse-url)))
 
 (defn save-response-menu []
   (context-menu/make-context-menu
